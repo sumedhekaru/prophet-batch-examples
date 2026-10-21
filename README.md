@@ -8,7 +8,7 @@ jobs, Dataproc and Spark.
 Running these is also how prophet-batch gets tested in practice. Bugs found here are reported to the repository they
 belong to (prophet-batch, or Prophet itself) and fixed there.
 
-Status: in development, private. The first use case runs locally, in a local Linux container and as a Cloud Run job; Dataproc comes next.
+Status: in development, private. The first use case runs locally, in a local Linux container, as a Cloud Run job and on Spark (Dataproc Serverless).
 
 ## Use cases
 

@@ -12,8 +12,8 @@ plus M5 calendar events as holidays; plus SNAP days of the three states as regre
 **Reported.** Accuracy on the 28 held-out days (WAPE, sMAPE, MASE, 80% interval coverage) and speed (fit + forecast
 time), per environment.
 
-**Environments.** [local](envs/local/), [docker](envs/docker/) and [cloudrun_job](envs/cloudrun_job/) run;
-[dataproc](envs/dataproc/) next.
+**Environments.** [local](envs/local/), [docker](envs/docker/), [cloudrun_job](envs/cloudrun_job/) and
+[dataproc](envs/dataproc/) (Spark) run.
 
 ## Results
 
@@ -25,7 +25,7 @@ Local, Apple M4 (10 cores), 1,437 items, fit + forecast ([full tables](results/l
 | + events | 72.8 s | 7.1 s (10.3×) | −0.0011 ± 0.0021 |
 | + events + SNAP | 80.0 s | 9.3 s (8.6×) | −0.0010 ± 0.0022 |
 
-prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.6–4.2× faster. In a Linux container (Docker, same Mac): 7.8–8.6× ([docker-linux-arm64.md](results/docker-linux-arm64.md)); prophet-batch's forecasts match across the two platforms to 3·10⁻⁹, stock Prophet's differ by up to 11 units/day. On a Cloud Run job (4 vCPU): 10.6× / 10.3× / 8.8× ([cloudrun-us-east1.md](results/cloudrun-us-east1.md)).
+prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.6–4.2× faster. In a Linux container (Docker, same Mac): 7.8–8.6× ([docker-linux-arm64.md](results/docker-linux-arm64.md)); prophet-batch's forecasts match across the two platforms to 3·10⁻⁹, stock Prophet's differ by up to 11 units/day. On a Cloud Run job (4 vCPU): 10.6× / 10.3× / 8.8× ([cloudrun-us-east1.md](results/cloudrun-us-east1.md)). On Spark (Dataproc Serverless, single core in practice): 13.3× ([dataproc-us-east1.md](results/dataproc-us-east1.md)).
 
 ## Run it
 
