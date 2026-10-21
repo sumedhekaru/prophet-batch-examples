@@ -1,6 +1,8 @@
-# Dataproc image: pinned separately from uv.lock because Dataproc mounts its own pyspark (Spark 4.0, runtime 3.0),
-# whose pandas UDFs need pandas 2.x and pyarrow.
+# Dataproc image: pinned separately from uv.lock because Dataproc mounts its own pyspark (Spark 3.5, runtime 2.3),
+# whose pandas UDFs need pandas 2.x and pyarrow, and which imports distutils (gone in Python 3.12: setuptools
+# provides it).
 prophet==1.5.0
 pandas==2.2.3
 numpy==2.2.6
 pyarrow==19.0.1
+setuptools==75.8.0

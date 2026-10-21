@@ -1,25 +1,27 @@
-"""The use case on Spark (Dataproc Serverless): stock Prophet one item per task vs prophet-batch per group of items.
+"""The use case on Spark: one method per run, every phase timed, every task recorded (benchmark protocol, track F5).
 
-    spark-submit spark_main.py --data gs://BUCKET/data/m5 --out gs://BUCKET/results [--groups 16]
+    spark-submit spark_main.py --data DIR --out DIR --method batch|stock [--groups N] [--run-id ID]
 
-  batch  items hashed into --groups groups; groupBy(group).applyInPandas: fit_many + predict_many on each group, so
-         every task fits many series at once (history_uncertainty='analytic', only the interval columns returned)
-  stock  groupBy(item).applyInPandas: Prophet().fit + predict for each item, the usual Spark pattern; on a random
-         sample of --stock-n items (it is slow), timed and extrapolated; accuracy compared on that sample
-The driver first waits for the executors (and stops if none arrive), then runs batch, then stock.
-Both forecast history + 28 days, as in run.py; times are the wall time of each Spark job (data shuffled in, results
-collected). Forecasts are seeded per series, so prophet-batch's match a local run's whatever the grouping.
+  batch  items hashed into --groups groups; groupBy(group).applyInPandas runs fit_many + predict_many on each group
+         (many series per task; history_uncertainty='analytic', only the interval columns returned)
+  stock  groupBy(item).applyInPandas runs Prophet().fit + predict on each item (one series per task)
+Both use all 1,437 items and forecast history + 28 days (as run.py). Phase timestamps (time.time(), UTC epoch):
+script_start, session_ready, executors_ready, load_done, execute_start, execute_end, write_start, and write_end
+(in <run-id>.end.json, written last). Provisioning and
+shutdown come from the platform (Dataproc's batch state history); summarize.py combines them. Each output row carries
+the task's host, pid, start and end, so the parallelism actually used is measured, not assumed.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import socket
 import sys
 import tempfile
 import time
 import zlib
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,12 +29,12 @@ import pandas as pd
 
 from . import data
 from .forecast import Result
-from .run import evaluate, machine_info, paired
+from .run import evaluate, machine_info
 
 H = data.HORIZON
-OUT_SCHEMA = ('unique_id string, step int, yhat double, yhat_lower double, yhat_upper double, lp double, '
-              'fit_s double, predict_s double')
 BANDS = ['yhat', 'yhat_lower', 'yhat_upper']
+OUT_SCHEMA = ('unique_id string, step int, yhat double, yhat_lower double, yhat_upper double, lp double, '
+              'host string, pid int, t0 double, t1 double')
 
 
 def _quiet() -> None:
@@ -42,39 +44,36 @@ def _quiet() -> None:
     logging.getLogger('prophet').setLevel(logging.WARNING)
 
 
-def _rows(sid: str, bands: np.ndarray, lp: float, fit_s: float, predict_s: float) -> pd.DataFrame:
+def _rows(sid: str, bands: np.ndarray, lp: float, t0: float, t1: float) -> pd.DataFrame:
     return pd.DataFrame({'unique_id': sid, 'step': np.arange(H, dtype=np.int32), 'yhat': bands[0],
-                         'yhat_lower': bands[1], 'yhat_upper': bands[2], 'lp': lp, 'fit_s': fit_s,
-                         'predict_s': predict_s})
+                         'yhat_lower': bands[1], 'yhat_upper': bands[2], 'lp': lp, 'host': socket.gethostname(),
+                         'pid': os.getpid(), 't0': t0, 't1': t1})
 
 
 def stock_item(pdf: pd.DataFrame) -> pd.DataFrame:
     """One item: Prophet().fit + predict (seeded like run.py's stock side)."""
+    t0 = time.time()
     from prophet import Prophet
 
     _quiet()
     sid = str(pdf['unique_id'].iloc[0])
-    t0 = time.perf_counter()
     m = Prophet().fit(pdf[['ds', 'y']].sort_values('ds'))
-    t1 = time.perf_counter()
     np.random.seed(zlib.crc32(sid.encode()))
     fc = m.predict(m.make_future_dataframe(H)).tail(H)
-    t2 = time.perf_counter()
-    return _rows(sid, fc[BANDS].to_numpy().T, float(m.params['lp__'][0, 0]), t1 - t0, t2 - t1)
+    return _rows(sid, fc[BANDS].to_numpy().T, float(m.params['lp__'][0, 0]), t0, time.time())
 
 
 def batch_group(pdf: pd.DataFrame) -> pd.DataFrame:
     """A group of items: fit_many + predict_many in this task (one process)."""
+    t0 = time.time()
     from prophet_batch import fit_many, predict_many
 
     _quiet()
-    t0 = time.perf_counter()
     models = fit_many(pdf[['unique_id', 'ds', 'y']], n_jobs=1)
-    t1 = time.perf_counter()
     fcs = predict_many(models, periods=H, seed=0, history_uncertainty='analytic', columns=BANDS)
-    t2 = time.perf_counter()
-    return pd.concat([_rows(str(sid), fcs[sid].tail(H).to_numpy().T, float(m.params['lp__'][0, 0]),
-                            t1 - t0, t2 - t1) for sid, m in models.items()], ignore_index=True)
+    t1 = time.time()
+    return pd.concat([_rows(str(sid), fcs[sid].tail(H).to_numpy().T, float(m.params['lp__'][0, 0]), t0, t1)
+                      for sid, m in models.items()], ignore_index=True)
 
 
 def _to_result(method: str, out: pd.DataFrame, seconds: float, workers: int) -> Result:
@@ -82,120 +81,127 @@ def _to_result(method: str, out: pd.DataFrame, seconds: float, workers: int) -> 
     ids = list(dict.fromkeys(out['unique_id']))
     arr = {k: out[k].to_numpy().reshape(len(ids), H) for k in BANDS}
     lp = out.groupby('unique_id', sort=True)['lp'].first().loc[ids].to_numpy()
-    return Result(method, workers, ids, arr['yhat'], arr['yhat_lower'], arr['yhat_upper'], lp, seconds, 0.0,
-                  len(ids), {'task_fit_s': float(out.groupby('unique_id')['fit_s'].first().sum()),
-                             'task_predict_s': float(out.groupby('unique_id')['predict_s'].first().sum())})
+    return Result(method, workers, ids, arr['yhat'], arr['yhat_lower'], arr['yhat_upper'], lp, seconds, 0.0, len(ids))
 
 
-def _subset(r: Result, ids: list[str]) -> Result:
-    pos = [r.ids.index(s) for s in ids]
-    return Result(r.method, r.workers, list(ids), r.yhat[pos], r.lower[pos], r.upper[pos], r.lp[pos], r.fit_s,
-                  r.predict_s, len(ids), r.extra)
+def task_stats(out: pd.DataFrame, execute_s: float, cores: int) -> dict:
+    """Parallelism actually used, from the per-task records (a task = one item for stock, one group for batch)."""
+    tasks = out.drop_duplicates(['host', 'pid', 't0', 't1'])[['host', 'pid', 't0', 't1']]
+    busy = float((tasks['t1'] - tasks['t0']).sum())
+    events = sorted([(t, 1) for t in tasks['t0']] + [(t, -1) for t in tasks['t1']])
+    level = peak = 0
+    for _, step in events:
+        level += step
+        peak = max(peak, level)
+    return {'tasks': len(tasks), 'hosts': int(tasks['host'].nunique()),
+            'processes': int(tasks[['host', 'pid']].drop_duplicates().shape[0]), 'max_concurrent': peak,
+            'task_seconds_sum': busy, 'task_seconds_median': float((tasks['t1'] - tasks['t0']).median()),
+            'core_utilisation': busy / (execute_s * cores) if execute_s > 0 and cores else None,
+            'per_host_tasks': {str(h): int(n) for h, n in tasks['host'].value_counts().items()}}
 
 
 def _copy(spark, src: str, dst: str) -> None:
-    """Copy a file between the local disk and gs:// through Spark's Hadoop filesystem (GCS connector)."""
+    """Copy a file between the local disk and a Hadoop filesystem URI (gs://, file://) through Spark."""
     jvm = spark._jvm
     conf = spark._jsc.hadoopConfiguration()
     src_path, dst_path = jvm.org.apache.hadoop.fs.Path(src), jvm.org.apache.hadoop.fs.Path(dst)
-    remote = dst_path if dst.startswith('gs://') else src_path
-    fs = remote.getFileSystem(conf)
     if dst.startswith('gs://'):
-        fs.copyFromLocalFile(False, True, src_path, dst_path)
+        dst_path.getFileSystem(conf).copyFromLocalFile(False, True, src_path, dst_path)
     else:
-        fs.copyToLocalFile(False, src_path, dst_path, True)
+        src_path.getFileSystem(conf).copyToLocalFile(False, src_path, dst_path, True)
 
 
 def main(argv: list[str] | None = None) -> int:
+    marks = {'script_start': time.time()}
     from pyspark.sql import SparkSession
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--data', required=True, help='directory with sales_train_evaluation.csv and calendar.csv')
-    p.add_argument('--out', required=True, help='directory for the results')
-    p.add_argument('--groups', type=int, default=16, help='item groups for prophet-batch (default 16)')
-    p.add_argument('--stock-n', type=int, default=300, help='items for the stock run (default 300)')
+    p.add_argument('--data', required=True, help='directory (URI) with sales_train_evaluation.csv and calendar.csv')
+    p.add_argument('--out', required=True, help='directory (URI) for the results')
+    p.add_argument('--method', choices=('batch', 'stock'), required=True)
+    p.add_argument('--groups', type=int, default=0, help='item groups for batch (default: 4 per executor core)')
+    p.add_argument('--run-id', default=None, help='label for the output files (e.g. the batch id)')
     p.add_argument('--wait', type=int, default=600, help='seconds to wait for executors (default 600)')
+    p.add_argument('--n', type=int, default=0, help='first n items only, for smoke tests (default: all)')
     a = p.parse_args(argv)
 
-    spark = SparkSession.builder.appName('walmart-grocery-forecasting').getOrCreate()
+    spark = SparkSession.builder.appName(f'walmart-{a.method}').getOrCreate()
+    sc = spark.sparkContext
     spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'true')
-    expected = int(spark.conf.get('spark.executor.instances', '1'))
-    cores = expected * int(spark.conf.get('spark.executor.cores', '1'))
-    tracker = spark.sparkContext._jsc.sc().statusTracker()
-    t0 = time.perf_counter()
-    while not spark.sparkContext.master.startswith('local'):  # local mode: tasks run in the driver
-        up = len(tracker.getExecutorInfos()) - 1  # minus the driver
-        if up >= expected or time.perf_counter() - t0 > a.wait:
+    marks['session_ready'] = time.time()
+
+    local_mode = sc.master.startswith('local')
+    expected = int(sc.getConf().get('spark.executor.instances', '0') or 0)
+    tracker = sc._jsc.sc().statusTracker()
+    seen = []
+    while not local_mode:
+        seen.append(len(tracker.getExecutorInfos()) - 1)  # minus the driver
+        if (expected and seen[-1] >= expected) or time.time() - marks['session_ready'] > a.wait:
             break
-        time.sleep(5)
-    up = len(tracker.getExecutorInfos()) - 1 if not spark.sparkContext.master.startswith('local') else 1
-    print(f'executors up {up}/{expected} after {time.perf_counter() - t0:.0f} s', flush=True)
-    if up == 0:
-        raise SystemExit('no executors started; stopping')
+        time.sleep(2)
+    executors = 0 if local_mode else len(tracker.getExecutorInfos()) - 1
+    marks['executors_ready'] = time.time()
+    if not local_mode and executors == 0:
+        raise SystemExit('no executors registered; stopping')
+    cores = sc.defaultParallelism
+    print(f'master {sc.master}; executors {executors}/{expected}; parallelism {cores}', flush=True)
+
     local = Path(tempfile.mkdtemp())
     for name in ('sales_train_evaluation.csv', 'calendar.csv'):
         _copy(spark, f"{a.data.rstrip('/')}/{name}", f'file://{local / name}')
     train, test = data.split(data.load_items(local))
+    if a.n:
+        train, test = train.iloc[:a.n], test.iloc[:a.n]
     long_df = data.to_long(train)
-    long_df['group'] = [zlib.crc32(s.encode()) % a.groups for s in long_df['unique_id']]
+    groups = a.groups or 4 * cores
+    # Spark's adaptive execution would merge the post-shuffle partitions of this small (in bytes) data into one or two
+    # tasks, serialising the work; keep one partition per 1/4 core for both methods.
+    spark.conf.set('spark.sql.adaptive.coalescePartitions.enabled', 'false')
+    spark.conf.set('spark.sql.shuffle.partitions', str(4 * cores))
+    long_df['group'] = [zlib.crc32(s.encode()) % groups for s in long_df['unique_id']]
     sdf = spark.createDataFrame(long_df).cache()
     sdf.count()
-    print(f'{len(train):,} items; {a.groups} groups', flush=True)
+    marks['load_done'] = time.time()
 
-    rng = np.random.default_rng(0)
-    sample = sorted(str(x) for x in rng.choice(list(train.index), size=min(a.stock_n, len(train)), replace=False))
-    results = []
-    for method, run, n_items in (
-            ('spark_batch_per_group',
-             lambda: sdf.groupBy('group').applyInPandas(batch_group, OUT_SCHEMA), len(train)),
-            ('spark_stock_per_item',
-             lambda: sdf.filter(sdf.unique_id.isin(sample)).groupBy('unique_id')
-                        .applyInPandas(stock_item, OUT_SCHEMA), len(sample))):
-        print(f'{method}: started ({n_items} items)', flush=True)
-        t0 = time.perf_counter()
-        out = run().toPandas()
-        seconds = time.perf_counter() - t0
-        results.append(_to_result(method, out, seconds, cores))
-        print(f'{method}: {seconds:.1f} s for {n_items} items', flush=True)
+    print(f'{a.method}: {len(train):,} items; groups {groups if a.method == "batch" else "-"}', flush=True)
+    marks['execute_start'] = time.time()
+    if a.method == 'batch':
+        out = sdf.groupBy('group').applyInPandas(batch_group, OUT_SCHEMA).toPandas()
+    else:
+        out = sdf.groupBy('unique_id').applyInPandas(stock_item, OUT_SCHEMA).toPandas()
+    marks['execute_end'] = time.time()
+    execute_s = marks['execute_end'] - marks['execute_start']
+    print(f'{a.method}: execute {execute_s:.1f} s', flush=True)
 
-    batch, stock = results
-    stock_full_s = stock.total_s * len(train) / len(sample)
-    ids = sample
-    sub = train.loc[ids], test.loc[ids]
-    acc = {r.method: evaluate(_subset(r, ids), *sub) for r in results}
-    gain = batch.lp[[batch.ids.index(s) for s in ids]] - stock.lp[[stock.ids.index(s) for s in ids]]
-    report = {
-        'machine': {**machine_info(), 'spark': spark.version,
-                    'executor_instances': spark.conf.get('spark.executor.instances', None),
-                    'executor_cores': spark.conf.get('spark.executor.cores', None)},
-        'n': len(train), 'stock_n': len(sample), 'groups': a.groups, 'executors_up': up,
-        'seconds': {r.method: r.total_s for r in results}, 'stock_seconds_extrapolated': stock_full_s,
-        'task_seconds': {r.method: r.extra for r in results},
-        'accuracy': {k: v['summary'] for k, v in acc.items()},
-        'mase_vs_stock': paired(acc[stock.method]['per_series']['mase'], acc[batch.method]['per_series']['mase']),
-        'lp_ge_stan_share': float(np.mean(gain >= -1e-6)),
+    r = _to_result(a.method, out, execute_s, cores)
+    acc = evaluate(r, train, test)
+    run_id = a.run_id or f'{a.method}-{time.strftime("%Y%m%d-%H%M%S")}'
+    marks['write_start'] = time.time()
+    record = {
+        'run_id': run_id, 'method': a.method, 'n': len(train), 'groups': groups if a.method == 'batch' else None,
+        'marks': marks, 'spark': {'version': spark.version, 'master': sc.master, 'default_parallelism': cores,
+                                  'executors': executors, 'executors_expected': expected,
+                                  'executors_seen': seen[-5:], 'conf': {k: v for k, v in sc.getConf().getAll()
+                                                                        if k.startswith(('spark.executor',
+                                                                                         'spark.driver.cores',
+                                                                                         'spark.dynamicAllocation'))},
+                                  'shuffle_partitions': spark.conf.get('spark.sql.shuffle.partitions'),
+                                  'coalesce_partitions': spark.conf.get(
+                                      'spark.sql.adaptive.coalescePartitions.enabled')},
+        'machine': machine_info(), 'tasks': task_stats(out, execute_s, cores),
+        'accuracy': acc['summary'], 'per_series': {k: v.tolist() for k, v in acc['per_series'].items()},
+        'lp': r.lp.tolist(), 'ids': r.ids,
     }
-    s, b, d = acc[stock.method]['summary'], acc[batch.method]['summary'], report['mase_vs_stock']
-    md = '\n'.join([
-        f"# walmart_grocery_forecasting on Spark {spark.version}: {len(train):,} M5 FOODS items, 28-day holdout", '',
-        f"{report['machine']['timestamp']} · executors {report['machine']['executor_instances']} × "
-        f"{report['machine']['executor_cores']} cores · prophet {report['machine']['versions']['prophet']} · "
-        f"prophet-batch {report['machine']['commits']['prophet-batch']} · {a.groups} groups", '',
-        f"| method | wall s, all {len(train):,} items | vs stock |", '|---|---:|---:|',
-        f"| stock, one item per task (timed on {len(sample)}, extrapolated) | {stock_full_s:.1f} | 1.0× |",
-        f"| prophet-batch, fit_many per group | {batch.total_s:.1f} | {stock_full_s / batch.total_s:.1f}× |", '',
-        f"Accuracy on the {len(sample)} stock items: WAPE {s['wape']:.4f} / {b['wape']:.4f}, MASE {s['mase']:.4f} / "
-        f"{b['mase']:.4f}, 80% coverage {s['coverage']:.3f} / {b['coverage']:.3f} (stock / prophet-batch); "
-        f"Δ MASE {d['mean']:+.4f} ± {2 * d['se']:.4f}; log posterior ≥ Stan's on "
-        f"{100 * report['lp_ge_stan_share']:.1f}% of them.", ''])
-    print(md, flush=True)
-    stem = f"spark-default-{len(train)}-{datetime.now():%Y%m%d-%H%M%S}"
-    (local / f'{stem}.json').write_text(json.dumps(report, indent=1, default=str))
-    (local / f'{stem}.md').write_text(md)
-    np.savez_compressed(local / f'{stem}.npz', ids=np.array(batch.ids), stock_ids=np.array(stock.ids),
-                        **{f'{r.method}_{k}': getattr(r, k) for r in results for k in ('yhat', 'lower', 'upper')})
-    for suffix in ('json', 'md', 'npz'):
-        _copy(spark, f'file://{local / f"{stem}.{suffix}"}', f"{a.out.rstrip('/')}/{stem}.{suffix}")
+    (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str))
+    np.savez_compressed(local / f'{run_id}.npz', ids=np.array(r.ids), yhat=r.yhat, lower=r.lower, upper=r.upper)
+    for suffix in ('json', 'npz'):
+        _copy(spark, f'file://{local / f"{run_id}.{suffix}"}', f"{a.out.rstrip('/')}/{run_id}.{suffix}")
+    end = local / f'{run_id}.end.json'  # results written: the rest until the platform's end time is shutdown
+    end.write_text(json.dumps({'write_end': time.time()}))
+    _copy(spark, f'file://{end}', f"{a.out.rstrip('/')}/{end.name}")
+    print(json.dumps({'run_id': run_id, 'execute_s': execute_s, 'tasks': record['tasks']['tasks'],
+                      'hosts': record['tasks']['hosts'], 'max_concurrent': record['tasks']['max_concurrent'],
+                      'wape': acc['summary']['wape']}), flush=True)
     spark.stop()
     return 0
 

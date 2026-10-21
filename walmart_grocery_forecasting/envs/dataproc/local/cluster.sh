@@ -1,7 +1,7 @@
 #!/bin/sh
 # Local Spark standalone cluster from the test image: a master, 2 workers (2 cores each) and a separate driver, so
 # executors start in their own containers as on Dataproc. Data and results are folders standing in for the bucket.
-#   sh walmart_grocery_forecasting/envs/dataproc/local/cluster.sh [extra job arguments]
+#   sh walmart_grocery_forecasting/envs/dataproc/local/cluster.sh --method batch|stock [--n 100] [--run-id ID]
 set -e
 cd "$(dirname "$0")/../../../.."
 IMG=prophet-batch-examples/walmart-spark:local-test
@@ -25,4 +25,4 @@ docker run --rm --name pbe-driver --network pbe-spark --cpus 2 -e SPARK_HOME=$SP
     --conf spark.executor.instances=2 --conf spark.executor.cores=2 --conf spark.cores.max=4 \
     --conf spark.executor.memory=1500m \
     /job/spark_main.py \
-    --data file:///data --out file:///out --groups 16 --stock-n 40 --wait 120 "$@"
+    --data file:///data --out file:///out --wait 120 "$@"
