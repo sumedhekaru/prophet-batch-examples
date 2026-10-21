@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         seen.append(len(tracker.getExecutorInfos()) - 1)  # minus the driver
         if (expected and seen[-1] >= expected) or time.time() - marks['session_ready'] > a.wait:
             break
-        time.sleep(2)
+        time.sleep(0.5)
     executors = 0 if local_mode else len(tracker.getExecutorInfos()) - 1
     marks['executors_ready'] = time.time()
     if not local_mode and executors == 0:
