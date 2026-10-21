@@ -119,6 +119,19 @@ def main(argv: list[str] | None = None) -> int:
 
     spark = SparkSession.builder.appName('walmart-grocery-forecasting').getOrCreate()
     spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'true')
+    expected = int(spark.conf.get('spark.executor.instances', '1'))
+    cores = expected * int(spark.conf.get('spark.executor.cores', '1'))
+    tracker = spark.sparkContext._jsc.sc().statusTracker()
+    t0 = time.perf_counter()
+    while not spark.sparkContext.master.startswith('local'):  # local mode: tasks run in the driver
+        up = len(tracker.getExecutorInfos()) - 1  # minus the driver
+        if up >= expected or time.perf_counter() - t0 > a.wait:
+            break
+        time.sleep(5)
+    up = len(tracker.getExecutorInfos()) - 1 if not spark.sparkContext.master.startswith('local') else 1
+    print(f'executors up {up}/{expected} after {time.perf_counter() - t0:.0f} s', flush=True)
+    if up == 0:
+        raise SystemExit('no executors started; stopping')
     local = Path(tempfile.mkdtemp())
     for name in ('sales_train_evaluation.csv', 'calendar.csv'):
         _copy(spark, f"{a.data.rstrip('/')}/{name}", f'file://{local / name}')
@@ -127,19 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     long_df['group'] = [zlib.crc32(s.encode()) % a.groups for s in long_df['unique_id']]
     sdf = spark.createDataFrame(long_df).cache()
     sdf.count()
-    expected = int(spark.conf.get('spark.executor.instances', '1'))
-    cores = expected * int(spark.conf.get('spark.executor.cores', '1'))
-    tracker = spark.sparkContext._jsc.sc().statusTracker()
-    t0 = time.perf_counter()
-    while True:
-        up = len(tracker.getExecutorInfos()) - 1  # minus the driver
-        if up >= expected or time.perf_counter() - t0 > a.wait:
-            break
-        time.sleep(5)
-    print(f'{len(train):,} items; {a.groups} groups; executors up {up}/{expected} after '
-          f'{time.perf_counter() - t0:.0f} s', flush=True)
-    if up == 0:
-        raise SystemExit('no executors started; stopping')
+    print(f'{len(train):,} items; {a.groups} groups', flush=True)
 
     rng = np.random.default_rng(0)
     sample = sorted(str(x) for x in rng.choice(list(train.index), size=min(a.stock_n, len(train)), replace=False))
