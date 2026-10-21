@@ -62,9 +62,9 @@ while [ "$rep" -le "$REPS" ]; do
 done
 
 # Results
-gcloud storage cp "gs://$BUCKET/bench/$STAMP/*" "$OUT/" >/dev/null 2>&1
-uv run python -m walmart_grocery_forecasting.pipeline.spark_summary "$OUT" > "$OUT/summary.md"
-log "summary: $OUT/summary.md"
+gcloud storage cp "gs://$BUCKET/bench/$STAMP/*" "$OUT/" >/dev/null 2>&1 || log "copying results FAILED"
+uv run python -m walmart_grocery_forecasting.pipeline.spark_summary "$OUT" > "$OUT/summary.md" \
+  && log "summary: $OUT/summary.md" || log "summary FAILED (raw results are in $OUT; rerun spark_summary)"
 if [ "$TEARDOWN" = 1 ]; then
   log "teardown"
   KEEP="" sh "$D/teardown.sh"

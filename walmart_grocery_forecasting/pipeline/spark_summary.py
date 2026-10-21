@@ -58,11 +58,14 @@ def load(directory: Path) -> list[dict]:
         if f.name.endswith(('.end.json', '.batch.json')):
             continue
         rec = json.loads(f.read_text())
+        if 'marks' not in rec:  # config.json and other non-run files
+            continue
         end_f, batch_f = f.with_suffix('.end.json'), f.with_suffix('.batch.json')
         end = json.loads(end_f.read_text()) if end_f.exists() else {'write_end': rec['marks']['write_start']}
         batch = json.loads(batch_f.read_text()) if batch_f.exists() else None
         npz = np.load(f.with_suffix('.npz'))
-        dcu = int(batch['runtimeInfo']['approximateUsage'].get('milliDcuSeconds', 0)) / 1000 if batch else None
+        usage = ((batch or {}).get('runtimeInfo') or {}).get('approximateUsage') or {}
+        dcu = int(usage['milliDcuSeconds']) / 1000 if 'milliDcuSeconds' in usage else None  # not reported by 2.x
         runs.append({'id': rec['run_id'], 'method': rec['method'], 'rec': rec, 'phases': run_phases(rec, end, batch),
                      'dcu_s': dcu, 'yhat': npz['yhat'], 'ids': list(npz['ids'])})
     return runs

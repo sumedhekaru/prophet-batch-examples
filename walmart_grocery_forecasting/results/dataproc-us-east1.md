@@ -1,34 +1,29 @@
-# Spark: Dataproc Serverless (us-east1) and a local Spark cluster
+# Spark on Dataproc Serverless (us-east1)
 
-2026-10-21 · job [pipeline/spark_job.py](../pipeline/spark_job.py), image [envs/dataproc](../envs/dataproc/) (Debian 12,
-Python 3.12, prophet 1.5.0, prophet-batch `d4f7824`, pandas 2.2.3, pyarrow 19) · 1,437 M5 FOODS items, 28 days held
-out · prophet-batch: items hashed into 16 groups, `fit_many` + `predict_many` per group (`applyInPandas`); stock: one
-`Prophet` per item per task (`applyInPandas`), the usual Spark pattern.
+**Reproducible benchmark, 2026-10-21** (full tables and every run: [dataproc-bench-20261021.md](dataproc-bench-20261021.md)).
+Runtime 2.3 (Spark 3.5.3) · driver 4 cores + 2 executors × 4 cores · 1,437 M5 FOODS items, history + 28 days ·
+one method per batch, 3 repetitions each, alternating order · reproduce:
+`PROJECT=… REGION=us-east1 BUCKET=… sh walmart_grocery_forecasting/envs/dataproc/benchmark.sh`.
 
-## Dataproc Serverless (runtime 3.0, Spark 4.0.2)
-
-| method | wall s, all 1,437 items | vs stock |
+| phase (s, median (min–max)) | stock: one item per task | prophet-batch: `fit_many` per group |
 |---|---:|---:|
-| stock, one item per task | 1,192.9 | 1.0× |
-| prophet-batch, `fit_many` per group | **90.0** | **13.3×** |
+| provision (created → running) | 85.9 (85.8–90.9) | 90.7 (90.5–97.7) |
+| driver start | 35.0 (34.5–36.7) | 36.8 (35.9–61.7) |
+| executors registered | 11.1 (10.1–12.1) | 9.1 (8.1–10.6) |
+| data load | 26.1 (25.7–26.6) | 26.0 (24.8–29.9) |
+| **execute** | **263.5 (258.1–265.9)** | **40.3 (37.7–41.7)** |
+| post (accuracy, write) | 1.2 (1.1–1.3) | 1.3 (1.1–1.3) |
+| shutdown | 5.0 (4.9–5.0) | 5.0 (4.9–5.1) |
+| **end to end** | **427.7 (422.1–436.7)** | **210.2 (208.4–241.4)** |
 
-Accuracy: WAPE 0.3448 / 0.3438, MASE 1.4281 / 1.4261, 80% coverage 0.721 / 0.720 (stock / prophet-batch); Δ MASE
-−0.0020 ± 0.0022; log posterior ≥ Stan's on 100% of items (the same numbers as on Cloud Run, an x86 platform too).
+- **Execution speed-up 6.5×** (per repetition 7.0×, 6.6×, 6.2×); **end to end 2.0×** (1.8×, 2.1×, 2.0×): ≈ 160 s of
+  each batch is platform setup and data load, the same for both methods.
+- Both used the whole cluster: 2 hosts, 8 processes, 8 tasks at a time (per-task records). Core utilisation during
+  execute: stock 84%, prophet-batch 42%; prophet-batch's 32 groups leave cores idle at the end (room to improve).
+- Same accuracy (WAPE 0.3448 / 0.3438, MASE 1.4281 / 1.4261), and each method's forecasts identical in all 3 runs.
 
-**Caveat: this ran on one core.** We asked for a 4-core driver and 2 executors × 4 cores, but Spark ran in local mode
-inside the driver (the job saw a `local` master and no executors), and the stock tasks' own times add up to the wall
-time, so the tasks ran one at a time. The comparison is fair (both methods in the same mode), and close to other
-single-process results (Cloud Run 15×), but it is not a multi-executor result. Why Dataproc chose local mode is open.
+**Earlier, superseded:** runs on runtime 3.0 (incl. a 13.3× figure) ran Spark in local mode on one thread: runtime
+3.0 sets `spark.master=local` for PySpark batches (diagnosed with `envs/dataproc/diag.py`; see the env README).
 
-## Local Spark cluster (Docker on the M4; Spark 4.0.1, native arm64)
-
-| setup | prophet-batch, all items | stock, 40 items extrapolated | speed-up |
-|---|---:|---:|---:|
-| local mode, 4 cores | 9.7 s | 348.4 s | 35.9× |
-| standalone master + 2 executors × 2 cores + driver | 10.1 s | 367.8 s | 36.3× |
-
-These show the job and image work with executors in separate containers. The speed-ups overstate the gap: the
-stock time is extrapolated from 40 items, which also multiplies Spark's fixed per-job overhead, and all containers
-shared one Mac. Reproduce: `envs/dataproc/local/` (Dockerfile + `cluster.sh`).
-
-All GCP resources were deleted after the runs (`teardown.sh`).
+**Local Spark cluster (Docker on the M4):** the job and image also work on a standalone master + 2 executors; local
+numbers there are behaviour checks, not benchmarks.
