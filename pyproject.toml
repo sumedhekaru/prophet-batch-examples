@@ -6,12 +6,18 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "prophet==1.5.0",
     "prophet-batch",
+]
+
+[dependency-groups]
+# Local notebooks and plots; the container images install only the runtime dependencies.
+notebook = [
     "jupyter",
     "matplotlib",
 ]
 
 [tool.uv]
 package = false
+default-groups = ["notebook"]
 
 [tool.uv.sources]
 # For now prophet-batch comes from a clone next to this repo

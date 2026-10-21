@@ -42,7 +42,9 @@ def _cmd(*args: str) -> str | None:
 
 
 def machine_info() -> dict[str, Any]:
-    def commit(path: Path) -> str | None:
+    def commit(path: Path, env_var: str) -> str | None:
+        if os.environ.get(env_var):  # set in container images at build time
+            return os.environ[env_var]
         rev = _cmd('git', '-C', str(path), 'rev-parse', '--short', 'HEAD')
         dirty = _cmd('git', '-C', str(path), 'status', '--porcelain', '--untracked-files=no')
         return f'{rev}{"+dirty" if dirty else ""}' if rev else None
@@ -52,12 +54,14 @@ def machine_info() -> dict[str, Any]:
     return {
         'timestamp': datetime.now().isoformat(timespec='seconds'),
         'platform': platform.platform(),
-        'cpu': _cmd('sysctl', '-n', 'machdep.cpu.brand_string') or platform.processor(),
+        'cpu': _cmd('sysctl', '-n', 'machdep.cpu.brand_string') or platform.processor() or platform.machine(),
+        'container': Path('/.dockerenv').exists(),
         'logical_cpus': os.cpu_count(),
         'python': sys.version.split()[0],
         'versions': {p: version(p) for p in ('prophet', 'prophet-batch', 'cmdstanpy', 'numpy', 'pandas')},
-        'commits': {'prophet-batch-examples': commit(HERE.parent),
-                    'prophet-batch': commit(Path(prophet_batch.__file__).resolve().parents[2])},
+        'commits': {'prophet-batch-examples': commit(HERE.parent, 'EXAMPLES_COMMIT'),
+                    'prophet-batch': commit(Path(prophet_batch.__file__).resolve().parents[2],
+                                            'PROPHET_BATCH_COMMIT')},
         'thread_env': {v: os.environ.get(v) for v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
                                                       'VECLIB_MAXIMUM_THREADS')},
     }
