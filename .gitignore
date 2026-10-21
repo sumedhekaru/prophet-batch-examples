@@ -5,6 +5,8 @@ JOURNAL.md
 data/
 **/results/*.json
 **/results/*.csv
+**/results/*.npz
+**/results/runs/
 
 # Python / notebooks / tooling
 __pycache__/
