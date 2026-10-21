@@ -23,6 +23,9 @@ the summary of the reference run is committed under [results/](../../results/). 
   foreach ($m in 'default', 'events', 'events_snap') { uv run python -m walmart_grocery_forecasting.pipeline.run --model $m }
   ```
 
+  If `uv sync` can't download Python (certificate or proxy errors on managed networks), point it at an installed
+  Python 3.12: `uv sync --python C:\path\to\python.exe` (or try `uv sync --native-tls`).
+
   prophet-batch's worker processes use `spawn` on every OS, so in your own scripts call `fit_many` / `predict_many`
   with `n_jobs != 1` under `if __name__ == '__main__':`.
 
