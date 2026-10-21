@@ -13,14 +13,16 @@ PROJECT=my-project REGION=us-central1 BUCKET=my-bucket MODEL=default \
 ```
 
 `deploy.sh` creates an Artifact Registry repository and the bucket if they are missing, copies the verified M5
-archive to `gs://$BUCKET/data/m5/`, deploys the job (8 vCPU, 32 GiB, one task, one-hour timeout, no retries) and
-runs it. Results land in `gs://$BUCKET/results/` (`cloudrun-<model>-1437-<timestamp>.{json,npz,md}`).
+archive to `gs://$BUCKET/data/m5/`, deploys the job (default 4 vCPU, 8 GiB: `CPU` / `MEMORY`; one task, one-hour timeout, no retries) and
+runs one execution per model variant (`MODELS`), then copies the results to `results/runs/`. Results land in `gs://$BUCKET/results/` (`cloudrun-<model>-1437-<timestamp>.{json,npz,md}`).
 
 **Local simulation.** `simulate.sh` runs the amd64 image with a local directory (`data/fake-bucket/`) mounted where
 the job mounts the bucket, with the job's environment variables and `--cpus 8`. On Apple Silicon the image runs
 under emulation, so it checks behaviour, not speed.
 
-**Workers.** Cloud Run limits CPUs with a cgroup quota, which `os.cpu_count()` does not see. The pipeline's default
-worker count and prophet-batch's `n_jobs=-1` both read the quota, so an 8-vCPU job runs 8 workers on both sides.
+**Workers.** Cloud Run limits CPUs with a cgroup v1 CFS quota (a 4-vCPU job: ≈ 3.7–3.9 CPUs on a machine showing
+5–6), which `os.cpu_count()` does not see. The pipeline's default worker count and prophet-batch's `n_jobs=-1` both
+read the quota, so a 4-vCPU job runs 4 workers on both sides.
 
-Status: image and local simulation work; `deploy.sh` has not been run on GCP yet.
+Status: run on GCP on 2026-10-21 (4 vCPU / 8 GiB, us-east1): [results](../../results/cloudrun-us-east1.md); the
+resources were deleted afterwards with `teardown.sh`.

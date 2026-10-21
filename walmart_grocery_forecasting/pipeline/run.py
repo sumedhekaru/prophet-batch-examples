@@ -41,16 +41,22 @@ def _cmd(*args: str) -> str | None:
         return None
 
 
-def available_cpus() -> int:
-    """CPUs this process may use: the affinity set, capped by a container's CPU quota (cgroup v2 cpu.max), which
-    os.cpu_count() ignores. Same rule as prophet-batch's n_jobs=-1, so both sides get the same worker count.
+def available_cpus(cgroup: Path = Path('/sys/fs/cgroup')) -> int:
+    """CPUs this process may use: the affinity set, capped by a container's CPU quota (cgroup v2 cpu.max, or v1 CFS
+    as on Cloud Run), which os.cpu_count() ignores. Same rule as prophet-batch's n_jobs=-1, so both sides get the same
+    worker count.
     """
     n = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
-    try:
-        quota, period = Path('/sys/fs/cgroup/cpu.max').read_text().split()[:2]
-        n = min(n, max(1, -(-int(quota) // int(period))))
-    except (OSError, ValueError):  # no cgroup v2 file, or 'max' (no quota)
-        pass
+    for quota_file, period_file in ((cgroup / 'cpu.max', None),
+                                    (cgroup / 'cpu' / 'cpu.cfs_quota_us', cgroup / 'cpu' / 'cpu.cfs_period_us')):
+        try:
+            text = quota_file.read_text().split()
+            quota, period = (text[0], text[1]) if period_file is None else (text[0], period_file.read_text().strip())
+            q, p = int(quota), int(period)
+        except (OSError, ValueError, IndexError):  # missing, or 'max' (no quota)
+            continue
+        if q > 0 and p > 0:  # v1 uses -1 for no quota
+            return max(1, min(n, -(-q // p)))
     return n
 
 
