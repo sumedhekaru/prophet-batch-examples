@@ -4,3 +4,4 @@
 !walmart_grocery_forecasting/pipeline/
 !walmart_grocery_forecasting/envs/docker/
 walmart_grocery_forecasting/pipeline/__pycache__/
+!walmart_grocery_forecasting/envs/dataproc/

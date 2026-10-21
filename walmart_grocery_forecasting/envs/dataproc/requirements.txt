@@ -1,0 +1,6 @@
+# Dataproc image: pinned separately from uv.lock because Dataproc mounts its own pyspark (Spark 4.0, runtime 3.0),
+# whose pandas UDFs need pandas 2.x and pyarrow.
+prophet==1.5.0
+pandas==2.2.3
+numpy==2.2.6
+pyarrow==19.0.1
