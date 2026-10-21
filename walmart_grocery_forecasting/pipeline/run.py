@@ -2,8 +2,9 @@
 
     uv run python -m walmart_grocery_forecasting.pipeline.run                 # all 1,437 items
     uv run python -m walmart_grocery_forecasting.pipeline.run --n 50          # smoke run on a random sample
+    uv run python -m walmart_grocery_forecasting.pipeline.run --model events_snap   # holidays + SNAP (models.py)
 
-Writes results/runs/<env>-<n>-<timestamp>.{json,npz,md} (JSON: everything incl. per-series metrics; npz: the test-day
+Writes results/runs/<env>-<model>-<n>-<timestamp>.{json,npz,md} (JSON: everything incl. per-series metrics; npz: the test-day
 forecasts of every method; md: the summary tables). Needs the data: python -m walmart_grocery_forecasting.pipeline.data
 """
 
@@ -25,6 +26,7 @@ import pandas as pd
 
 from . import data
 from .forecast import Result, run_batch, run_stock_pool, run_stock_serial
+from .models import VARIANTS, ModelSpec
 from .metrics import coverage, mase, smape, wape_parts
 
 HERE = Path(__file__).resolve().parents[1]
@@ -96,6 +98,7 @@ def markdown(info: dict[str, Any], n: int, rows: list[dict[str, Any]], checks: d
              f"{info['timestamp']} · {info['cpu']} ({info['logical_cpus']} logical CPUs) · {info['platform']} · "
              f"Python {info['python']} · prophet {v['prophet']} · prophet-batch {v['prophet-batch']} "
              f"({info['commits']['prophet-batch']}) · examples {info['commits']['prophet-batch-examples']}", '',
+             f"Model: `{info['model']}` (see pipeline/models.py)", '',
              '## Speed (fit + forecast of history and 28 days)', '',
              '| method | workers | fit s | forecast s | total s | vs stock pool |', '|---|---:|---:|---:|---:|---:|']
     pool = next(r['total_s'] for r in rows if r['method'] == 'stock_pool')
@@ -122,6 +125,7 @@ def main() -> int:
     p.add_argument('--n', type=int, default=None, help='random sample of n items (default: all)')
     p.add_argument('--serial-n', type=int, default=30, help='items timed for stock_serial (default 30)')
     p.add_argument('--workers', type=int, default=os.cpu_count(), help='process count (default: all CPUs)')
+    p.add_argument('--model', choices=VARIANTS, default='default', help='model variant (default: Prophet())')
     p.add_argument('--env', default='local', help='environment label for the output files')
     p.add_argument('--data-dir', type=Path, default=data.DATA_DIR)
     a = p.parse_args()
@@ -132,16 +136,17 @@ def main() -> int:
         keep = np.sort(rng.choice(len(train), size=a.n, replace=False))
         train, test = train.iloc[keep], test.iloc[keep]
     n, h, ids = len(train), test.shape[1], list(train.index)
-    long_df = data.to_long(train)
-    series = {sid: g[['ds', 'y']].reset_index(drop=True) for sid, g in long_df.groupby('unique_id', sort=False)}
+    spec = ModelSpec(a.model, a.data_dir)
+    long_df = spec.with_regressors(data.to_long(train))
+    series = {sid: g.drop(columns='unique_id').reset_index(drop=True) for sid, g in long_df.groupby('unique_id', sort=False)}
     serial_ids = list(np.random.default_rng(1).choice(ids, size=min(a.serial_n, n), replace=False))
-    print(f'{n:,} items, train {train.shape[1]:,} days, test {h}; workers {a.workers}')
+    print(f'{n:,} items, train {train.shape[1]:,} days, test {h}; model {a.model}; workers {a.workers}')
 
     results: list[Result] = []
-    steps = [('stock_serial', lambda: [run_stock_serial({s: series[s] for s in serial_ids}, h)]),
-             ('stock_pool', lambda: [run_stock_pool(series, h, a.workers)]),
-             ('batch n_jobs=1', lambda: run_batch(long_df, h, 1)),
-             (f'batch n_jobs={a.workers}', lambda: run_batch(long_df, h, a.workers))]
+    steps = [('stock_serial', lambda: [run_stock_serial({s: series[s] for s in serial_ids}, h, spec)]),
+             ('stock_pool', lambda: [run_stock_pool(series, h, spec, a.workers)]),
+             ('batch n_jobs=1', lambda: run_batch(long_df, h, spec, 1)),
+             (f'batch n_jobs={a.workers}', lambda: run_batch(long_df, h, spec, a.workers))]
     for label, step in steps:
         print(f'{label} ...', flush=True)
         for r in step():
@@ -176,9 +181,9 @@ def main() -> int:
     fallbacks = batch[('batch_sampled', 1)].extra.get('fallbacks', {})
     checks['series fit by Stan (fallbacks)'] = f'{len(fallbacks)}' + (f': {fallbacks}' if fallbacks else '')
 
-    info = machine_info()
+    info = {**machine_info(), 'model': a.model}
     RUNS.mkdir(parents=True, exist_ok=True)
-    stem = RUNS / f"{a.env}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
+    stem = RUNS / f"{a.env}-{a.model}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
     stem.with_suffix('.json').write_text(json.dumps(
         {'machine': info, 'args': {k: str(v) for k, v in vars(a).items()}, 'n': n, 'horizon': h, 'ids': ids,
          'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str))

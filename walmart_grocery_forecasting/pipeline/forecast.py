@@ -1,8 +1,8 @@
 """Fit + forecast every item with stock Prophet and with prophet-batch, timed.
 
-Every method does what a user does: fit default Prophet() on the training days, then forecast the history plus the
-next `horizon` days (`make_future_dataframe(horizon)`), so the timings include history intervals. Accuracy uses the
-last `horizon` rows.
+Every method does what a user does: fit the model variant (models.py) on the training days, then forecast the history
+plus the next `horizon` days (`make_future_dataframe(horizon)`, with the regressor values joined), so the timings
+include history intervals. Accuracy uses the last `horizon` rows.
 
   stock_serial  Prophet().fit + predict per series in one process (on a sample: it is slow; extrapolated)
   stock_pool    the same per series in a process pool (spawn, `workers` processes)
@@ -23,6 +23,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from .models import ModelSpec
 
 
 @dataclass
@@ -56,16 +58,14 @@ def _quiet() -> None:
     logging.getLogger('cmdstanpy').disabled = True
 
 
-def _stock_one(args: tuple[str, pd.DataFrame, int]) -> tuple[str, np.ndarray, float, float, float]:
-    sid, train, horizon = args
-    from prophet import Prophet
-
+def _stock_one(args: tuple[str, pd.DataFrame, int, ModelSpec]) -> tuple[str, np.ndarray, float, float, float]:
+    sid, train, horizon, spec = args
     _quiet()
     t0 = time.perf_counter()
-    m = Prophet().fit(train)
+    m = spec(sid).fit(train)
     t1 = time.perf_counter()
     np.random.seed(zlib.crc32(sid.encode()))
-    fc = m.predict(m.make_future_dataframe(horizon)).tail(horizon)
+    fc = m.predict(spec.with_regressors(m.make_future_dataframe(horizon))).tail(horizon)
     t2 = time.perf_counter()
     bands = fc[['yhat', 'yhat_lower', 'yhat_upper']].to_numpy().T
     return sid, bands, float(m.params['lp__'][0, 0]), t1 - t0, t2 - t1
@@ -78,17 +78,17 @@ def _stock_result(method: str, workers: int, out: list, fit_s: float, predict_s:
                   fit_s, predict_s, len(ids))
 
 
-def run_stock_serial(series: dict[str, pd.DataFrame], horizon: int) -> Result:
-    out = [_stock_one((sid, df, horizon)) for sid, df in series.items()]
+def run_stock_serial(series: dict[str, pd.DataFrame], horizon: int, spec: ModelSpec) -> Result:
+    out = [_stock_one((sid, df, horizon, spec)) for sid, df in series.items()]
     return _stock_result('stock_serial', 1, out, sum(o[3] for o in out), sum(o[4] for o in out))
 
 
-def run_stock_pool(series: dict[str, pd.DataFrame], horizon: int, workers: int) -> Result:
+def run_stock_pool(series: dict[str, pd.DataFrame], horizon: int, spec: ModelSpec, workers: int) -> Result:
     """Wall time of the whole pool; split into fit / predict by the workers' summed shares."""
     t0 = time.perf_counter()
     ctx = multiprocessing.get_context('spawn')
     with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
-        out = list(pool.map(_stock_one, [(sid, df, horizon) for sid, df in series.items()], chunksize=4))
+        out = list(pool.map(_stock_one, [(sid, df, horizon, spec) for sid, df in series.items()], chunksize=4))
     wall = time.perf_counter() - t0
     fit_share = sum(o[3] for o in out) / sum(o[3] + o[4] for o in out)
     return _stock_result('stock_pool', workers, out, wall * fit_share, wall * (1 - fit_share))
@@ -107,8 +107,12 @@ class _Fallbacks(logging.Handler):
             self.reasons[str(sid)] = str(reason)
 
 
-def run_batch(long_df: pd.DataFrame, horizon: int, workers: int, seed: int = 0) -> list[Result]:
-    """One fit_many, then predict_many once per history-interval mode; one Result per mode."""
+def run_batch(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int, seed: int = 0) -> list[Result]:
+    """One fit_many, then predict_many once per history-interval mode; one Result per mode.
+
+    Used as the prophet-batch README says: Prophet arguments shared by all series go to fit_many directly; regressors
+    need make_model, and their future values go in `futures`.
+    """
     from prophet_batch import fit_many, predict_many
 
     log = logging.getLogger('prophet_batch')
@@ -117,7 +121,10 @@ def run_batch(long_df: pd.DataFrame, horizon: int, workers: int, seed: int = 0) 
     log.setLevel(logging.DEBUG)
     try:
         t0 = time.perf_counter()
-        models = fit_many(long_df, n_jobs=workers)
+        if spec.regressors:
+            models = fit_many(long_df, make_model=spec, n_jobs=workers)
+        else:
+            models = fit_many(long_df, n_jobs=workers, **spec.kwargs())
         fit_s = time.perf_counter() - t0
     finally:
         log.removeHandler(handler)
@@ -127,7 +134,11 @@ def run_batch(long_df: pd.DataFrame, horizon: int, workers: int, seed: int = 0) 
     results = []
     for mode in (True, 'analytic'):
         t0 = time.perf_counter()
-        fcs = predict_many(models, periods=horizon, seed=seed, n_jobs=workers, history_uncertainty=mode)
+        if spec.regressors:
+            futures = {sid: spec.with_regressors(m.make_future_dataframe(horizon)) for sid, m in models.items()}
+            fcs = predict_many(models, futures=futures, seed=seed, n_jobs=workers, history_uncertainty=mode)
+        else:
+            fcs = predict_many(models, periods=horizon, seed=seed, n_jobs=workers, history_uncertainty=mode)
         predict_s = time.perf_counter() - t0
         bands = np.array([fcs[sid][['yhat', 'yhat_lower', 'yhat_upper']].tail(horizon).to_numpy().T
                           for sid in ids])
