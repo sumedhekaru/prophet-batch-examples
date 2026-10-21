@@ -41,6 +41,19 @@ def _cmd(*args: str) -> str | None:
         return None
 
 
+def available_cpus() -> int:
+    """CPUs this process may use: the affinity set, capped by a container's CPU quota (cgroup v2 cpu.max), which
+    os.cpu_count() ignores. Same rule as prophet-batch's n_jobs=-1, so both sides get the same worker count.
+    """
+    n = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
+    try:
+        quota, period = Path('/sys/fs/cgroup/cpu.max').read_text().split()[:2]
+        n = min(n, max(1, -(-int(quota) // int(period))))
+    except (OSError, ValueError):  # no cgroup v2 file, or 'max' (no quota)
+        pass
+    return n
+
+
 def machine_info() -> dict[str, Any]:
     def commit(path: Path, env_var: str) -> str | None:
         if os.environ.get(env_var):  # set in container images at build time
@@ -57,6 +70,7 @@ def machine_info() -> dict[str, Any]:
         'cpu': _cmd('sysctl', '-n', 'machdep.cpu.brand_string') or platform.processor() or platform.machine(),
         'container': Path('/.dockerenv').exists(),
         'logical_cpus': os.cpu_count(),
+        'available_cpus': available_cpus(),
         'python': sys.version.split()[0],
         'versions': {p: version(p) for p in ('prophet', 'prophet-batch', 'cmdstanpy', 'numpy', 'pandas')},
         'commits': {'prophet-batch-examples': commit(HERE.parent, 'EXAMPLES_COMMIT'),
@@ -128,10 +142,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--n', type=int, default=None, help='random sample of n items (default: all)')
     p.add_argument('--serial-n', type=int, default=30, help='items timed for stock_serial (default 30)')
-    p.add_argument('--workers', type=int, default=os.cpu_count(), help='process count (default: all CPUs)')
+    p.add_argument('--workers', type=int, default=available_cpus(),
+                   help='process count (default: the CPUs available to this process)')
     p.add_argument('--model', choices=VARIANTS, default='default', help='model variant (default: Prophet())')
     p.add_argument('--env', default='local', help='environment label for the output files')
     p.add_argument('--data-dir', type=Path, default=data.DATA_DIR)
+    p.add_argument('--out', type=Path, default=RUNS, help=f'output directory (default {RUNS})')
     a = p.parse_args()
 
     train, test = data.split(data.load_items(a.data_dir))
@@ -186,8 +202,8 @@ def main() -> int:
     checks['series fit by Stan (fallbacks)'] = f'{len(fallbacks)}' + (f': {fallbacks}' if fallbacks else '')
 
     info = {**machine_info(), 'model': a.model}
-    RUNS.mkdir(parents=True, exist_ok=True)
-    stem = RUNS / f"{a.env}-{a.model}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
+    a.out.mkdir(parents=True, exist_ok=True)
+    stem = a.out / f"{a.env}-{a.model}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
     stem.with_suffix('.json').write_text(json.dumps(
         {'machine': info, 'args': {k: str(v) for k, v in vars(a).items()}, 'n': n, 'horizon': h, 'ids': ids,
          'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str))
