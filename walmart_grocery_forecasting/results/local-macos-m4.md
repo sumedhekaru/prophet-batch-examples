@@ -40,4 +40,4 @@ events + SNAP gives the lowest WAPE, for both.
 - prophet-batch forecasts are bit-identical with `n_jobs=1` and `n_jobs=10`.
 - Every fit's log posterior is at least Stan's (1,437 / 1,437; median gain ≈ 3).
 - No series fell back to Stan.
-- Setting BLAS threads to 1 (`OMP_NUM_THREADS` etc.) makes no difference to prophet-batch (default: 6.6 s vs 6.5 s).
+- Setting BLAS threads to 1 (`OMP_NUM_THREADS` etc.) made no difference to prophet-batch (default, at `a891bd0`: 6.6 s vs 6.5 s).
