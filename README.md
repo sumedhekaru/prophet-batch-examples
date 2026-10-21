@@ -31,6 +31,18 @@ walmart_grocery_forecasting/
   results/                         # result summaries (markdown); raw JSON stays local
 ```
 
+## Setup
+
+Needs [uv](https://docs.astral.sh/uv/) and, for now, a clone of prophet-batch next to this repo (it moves to PyPI
+later):
+
+```
+git clone https://github.com/sumedhekaru/prophet-batch.git
+git clone https://github.com/sumedhekaru/prophet-batch-examples.git
+cd prophet-batch-examples
+uv sync          # Python 3.12, prophet==1.5.0 from PyPI, prophet-batch (editable, ../prophet-batch), jupyter
+```
+
 ## Principles
 
 - Data is downloaded by a script and verified by checksum; it is never committed.
