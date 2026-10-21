@@ -12,8 +12,8 @@ plus M5 calendar events as holidays; plus SNAP days of the three states as regre
 **Reported.** Accuracy on the 28 held-out days (WAPE, sMAPE, MASE, 80% interval coverage) and speed (fit + forecast
 time), per environment.
 
-**Environments.** [local](envs/local/) first; then [docker](envs/docker/), [cloudrun_job](envs/cloudrun_job/) and
-[dataproc](envs/dataproc/), simulated locally with Docker before running on GCP.
+**Environments.** [local](envs/local/) and [docker](envs/docker/) run; [cloudrun_job](envs/cloudrun_job/) and
+[dataproc](envs/dataproc/) next, simulated locally with Docker before running on GCP.
 
 ## Results
 
@@ -21,11 +21,11 @@ Local, Apple M4 (10 cores), 1,437 items, fit + forecast ([full tables](results/l
 
 | model | stock, 10-process pool | prophet-batch | accuracy (Δ MASE, ± 2 SE) |
 |---|---:|---:|---:|
-| default | 53.4 s | 5.3 s (10.1×) | −0.0018 ± 0.0023 |
-| + events | 69.3 s | 7.9 s (8.8×) | −0.0011 ± 0.0021 |
-| + events + SNAP | 76.3 s | 10.1 s (7.6×) | −0.0010 ± 0.0022 |
+| default | 55.9 s | 5.5 s (10.2×) | −0.0018 ± 0.0023 |
+| + events | 72.8 s | 7.1 s (10.3×) | −0.0011 ± 0.0021 |
+| + events + SNAP | 80.0 s | 9.3 s (8.6×) | −0.0010 ± 0.0022 |
 
-prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.5–3.8× faster.
+prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.6–4.2× faster. In a Linux container (Docker, same Mac): 7.8–8.6× ([docker-linux-arm64.md](results/docker-linux-arm64.md)); prophet-batch's forecasts match across the two platforms to 3·10⁻⁹, stock Prophet's differ by up to 11 units/day.
 
 ## Run it
 

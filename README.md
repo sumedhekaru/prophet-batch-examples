@@ -8,13 +8,13 @@ jobs, Dataproc and Spark.
 Running these is also how prophet-batch gets tested in practice. Bugs found here are reported to the repository they
 belong to (prophet-batch, or Prophet itself) and fixed there.
 
-Status: in development, private. The first use case runs locally; Docker and cloud environments come next.
+Status: in development, private. The first use case runs locally and in a local Linux container; cloud environments come next.
 
 ## Use cases
 
 | Folder | Data | Question |
 |---|---|---|
-| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 7.6–10× faster than a 10-process stock pool (local, M4) |
+| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 8.6–10× faster than a 10-process stock pool (local, M4) |
 
 ## Layout
 

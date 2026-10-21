@@ -1,27 +1,30 @@
 # Local run: macOS, Apple M4 (10 cores)
 
-2026-10-21 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 (PyPI) · prophet-batch 0.1.0.dev0 (`f85cc3d`) ·
+2026-10-21 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 (PyPI) · prophet-batch 0.1.0.dev0 (`3150f51`) ·
 pandas 3.0.6 · numpy 2.5.4 · 1,437 M5 FOODS items, train 1,913 days, 28 days held out · 10 worker processes.
 Reproduce: `sh walmart_grocery_forecasting/envs/local/run.sh`.
 
 Every method fits the model and forecasts the history plus the 28 days, as `model.predict(model.make_future_dataframe(28))`
 does. prophet-batch: `fit_many` + `predict_many`, with history intervals sampled like stock (`history_uncertainty=True`)
-or in exact closed form (`'analytic'`).
+or in exact closed form (`'analytic'`), keeping only the interval columns (`predict_many(columns=...)`), as the stock
+workers return only those. Linux container: [docker-linux-arm64.md](docker-linux-arm64.md).
 
 ## Speed: seconds for all 1,437 items (fit + forecast)
 
 | model | stock, serial¹ | stock, 10-process pool | prophet-batch, sampled history intervals | prophet-batch, analytic history intervals |
 |---|---:|---:|---:|---:|
-| default `Prophet()` | 298.9 | 53.4 | 15.2 (3.5×) | **5.3 (10.1×)** |
-| + M5 events as holidays | 381.4 | 69.3 | 18.4 (3.8×) | **7.9 (8.8×)** |
-| + events + SNAP regressors | 402.6 | 76.3 | 20.2 (3.8×) | **10.1 (7.6×)** |
+| default `Prophet()` | 313.8 | 55.9 | 15.7 (3.6×) | **5.5 (10.2×)** |
+| + M5 events as holidays | 390.7 | 72.8 | 17.4 (4.2×) | **7.1 (10.3×)** |
+| + events + SNAP regressors | 407.7 | 80.0 | 19.3 (4.2×) | **9.3 (8.6×)** |
 
 Speed-ups are against the stock 10-process pool. ¹ Timed on 30 items, extrapolated.
 
 History of this table (dogfooding found both): the first run (prophet-batch `a891bd0`) gave 6.5 / 11.3 / 15.1 s
 (9.1× / 6.1× / 5.1×). `c8d9234` lets identical `make_model` configs share preprocessing (the SNAP variant's fit 5.6
 → 4.0 s); `f85cc3d` builds the forecast feature matrices once per configuration instead of twice per series
-(forecast at 10 workers: 4.2 → 3.0 s default, 8.3 → 4.8 s with holidays). Accuracy is unchanged to the last digit.
+(forecast at 10 workers: 4.2 → 3.0 s default, 8.3 → 4.8 s with holidays), giving 10.1× / 8.8× / 7.6×; `3150f51`
+adds `predict_many(columns=)`, so workers stop sending 112-column frames back (holidays: 4.8 → 3.9 s). Accuracy is
+unchanged to the last digit throughout.
 
 ## Accuracy on the 28 held-out days
 

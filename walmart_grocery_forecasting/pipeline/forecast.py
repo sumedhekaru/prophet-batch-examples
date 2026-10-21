@@ -26,6 +26,8 @@ import pandas as pd
 
 from .models import ModelSpec
 
+BANDS = ['yhat', 'yhat_lower', 'yhat_upper']
+
 
 @dataclass
 class Result:
@@ -111,7 +113,8 @@ def run_batch(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int
     """One fit_many, then predict_many once per history-interval mode; one Result per mode.
 
     Used as the prophet-batch README says: Prophet arguments shared by all series go to fit_many directly; regressors
-    need make_model, and their future values go in `futures`.
+    need make_model, and their future values go in `futures`. Only the interval columns are kept (`columns=`), as the
+    stock workers return only those too; full frames with 30 holidays would be 2.3 GB.
     """
     from prophet_batch import fit_many, predict_many
 
@@ -136,11 +139,13 @@ def run_batch(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int
         t0 = time.perf_counter()
         if spec.regressors:
             futures = {sid: spec.with_regressors(m.make_future_dataframe(horizon)) for sid, m in models.items()}
-            fcs = predict_many(models, futures=futures, seed=seed, n_jobs=workers, history_uncertainty=mode)
+            fcs = predict_many(models, futures=futures, seed=seed, n_jobs=workers, history_uncertainty=mode,
+                               columns=BANDS)
         else:
-            fcs = predict_many(models, periods=horizon, seed=seed, n_jobs=workers, history_uncertainty=mode)
+            fcs = predict_many(models, periods=horizon, seed=seed, n_jobs=workers, history_uncertainty=mode,
+                               columns=BANDS)
         predict_s = time.perf_counter() - t0
-        bands = np.array([fcs[sid][['yhat', 'yhat_lower', 'yhat_upper']].tail(horizon).to_numpy().T
+        bands = np.array([fcs[sid][BANDS].tail(horizon).to_numpy().T
                           for sid in ids])
         name = 'batch_sampled' if mode is True else 'batch_analytic'
         extra = {'fallbacks': handler.reasons} if workers == 1 else {}
