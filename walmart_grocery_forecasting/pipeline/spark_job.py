@@ -32,9 +32,24 @@ from .forecast import Result
 from .run import evaluate, machine_info
 
 H = data.HORIZON
+
+
+def _process_start() -> float | None:
+    """This process's start time (epoch s), from /proc (Linux); None elsewhere."""
+    try:
+        ticks = int(Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19])
+        boot = next(int(line.split()[1]) for line in Path('/proc/stat').read_text().splitlines()
+                    if line.startswith('btime'))
+        return boot + ticks / os.sysconf('SC_CLK_TCK')
+    except Exception:
+        return None
+
+
+PROCESS_START = _process_start()
+MODULE_LOADED = time.time()  # when a Python worker finished importing this module (and its imports)
 BANDS = ['yhat', 'yhat_lower', 'yhat_upper']
 OUT_SCHEMA = ('unique_id string, step int, yhat double, yhat_lower double, yhat_upper double, lp double, '
-              'host string, pid int, t0 double, t1 double')
+              'host string, pid int, t0 double, t1 double, proc_start double, module_loaded double')
 
 
 def _quiet() -> None:
@@ -47,7 +62,8 @@ def _quiet() -> None:
 def _rows(sid: str, bands: np.ndarray, lp: float, t0: float, t1: float) -> pd.DataFrame:
     return pd.DataFrame({'unique_id': sid, 'step': np.arange(H, dtype=np.int32), 'yhat': bands[0],
                          'yhat_lower': bands[1], 'yhat_upper': bands[2], 'lp': lp, 'host': socket.gethostname(),
-                         'pid': os.getpid(), 't0': t0, 't1': t1})
+                         'pid': os.getpid(), 't0': t0, 't1': t1, 'proc_start': PROCESS_START,
+                         'module_loaded': MODULE_LOADED})
 
 
 def stock_item(pdf: pd.DataFrame) -> pd.DataFrame:
@@ -102,8 +118,18 @@ def task_stats(out: pd.DataFrame, execute_s: float, cores: int) -> dict:
 
 def task_records(out: pd.DataFrame) -> list[dict]:
     """One record per task: host, pid, start, end, items processed."""
-    g = out.groupby(['host', 'pid', 't0', 't1'])['unique_id'].nunique().reset_index(name='items')
+    g = out.groupby(['host', 'pid', 't0', 't1', 'proc_start', 'module_loaded'], dropna=False)['unique_id'] \
+        .nunique().reset_index(name='items')
     return g.sort_values('t0').to_dict('records')
+
+
+def warm(_: object) -> list[tuple]:
+    """Warm-up task: start the Python worker and import prophet-batch (and Prophet) before the timed work."""
+    t0 = time.time()
+    import prophet_batch  # noqa: F401
+
+    time.sleep(1.0)  # long enough that every worker slot gets one task
+    return [(socket.gethostname(), os.getpid(), PROCESS_START, MODULE_LOADED, t0, time.time())]
 
 
 def stage_metrics(sc, since: float) -> list[dict] | str:
@@ -158,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--run-id', default=None, help='label for the output files (e.g. the batch id)')
     p.add_argument('--wait', type=int, default=600, help='seconds to wait for executors (default 600)')
     p.add_argument('--n', type=int, default=0, help='first n items only, for smoke tests (default: all)')
+    p.add_argument('--warmup', action='store_true',
+                   help='start every Python worker and import prophet-batch before execute (timed as its own phase)')
+    p.add_argument('--explore', default='',
+                   help='batch only: comma-separated group counts to run one after another (exploration, F6)')
     a = p.parse_args(argv)
 
     spark = SparkSession.builder.appName(f'walmart-{a.method}').getOrCreate()
@@ -194,9 +224,28 @@ def main(argv: list[str] | None = None) -> int:
     spark.conf.set('spark.sql.adaptive.coalescePartitions.enabled', 'false')
     spark.conf.set('spark.sql.shuffle.partitions', str(4 * cores))
     long_df['group'] = [zlib.crc32(s.encode()) % groups for s in long_df['unique_id']]
+    explore = [int(x) for x in a.explore.split(',') if x]
+    for g in explore:
+        long_df[f'g{g}'] = [zlib.crc32(s.encode()) % g for s in long_df['unique_id']]
     sdf = spark.createDataFrame(long_df).cache()
     sdf.count()
     marks['load_done'] = time.time()
+    warmup = None
+    if a.warmup or explore:
+        rows = sc.parallelize(range(2 * cores), 2 * cores).flatMap(warm).collect()
+        marks['warmup_done'] = time.time()
+        warmup = {'seconds': marks['warmup_done'] - marks['load_done'],
+                  'workers': [dict(zip(('host', 'pid', 'proc_start', 'module_loaded', 't0', 't1'), r)) for r in rows]}
+        print(f"warmup {warmup['seconds']:.1f} s; {len({(r[0], r[1]) for r in rows})} Python workers", flush=True)
+    variants = []
+    for g in explore:
+        t0 = time.time()
+        res = sdf.groupBy(f'g{g}').applyInPandas(batch_group, OUT_SCHEMA).toPandas()
+        t1 = time.time()
+        variants.append({'groups': g, 'execute_s': t1 - t0, 'tasks': task_stats(res, t1 - t0, cores),
+                         'task_records': task_records(res), 'stages': stage_metrics(sc, t0)})
+        print(f'explore groups {g}: execute {t1 - t0:.1f} s; utilisation '
+              f"{100 * variants[-1]['tasks']['core_utilisation']:.0f}%", flush=True)
 
     print(f'{a.method}: {len(train):,} items; groups {groups if a.method == "batch" else "-"}', flush=True)
     marks['execute_start'] = time.time()
@@ -227,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         'accuracy': acc['summary'], 'per_series': {k: v.tolist() for k, v in acc['per_series'].items()},
         'lp': r.lp.tolist(), 'ids': r.ids,
         'task_records': task_records(out), 'stages': stage_metrics(sc, marks['execute_start']),
+        'warmup': warmup, 'explore': variants,
     }
     (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str))
     np.savez_compressed(local / f'{run_id}.npz', ids=np.array(r.ids), yhat=r.yhat, lower=r.lower, upper=r.upper)

@@ -2,7 +2,7 @@
 # Reproducible Spark benchmark on Dataproc Serverless (track F5): stock vs prophet-batch, one method per batch,
 # REPS repetitions in alternating order, every phase timed (see pipeline/spark_summary.py), then teardown.
 #   PROJECT=... REGION=... BUCKET=... sh walmart_grocery_forecasting/envs/dataproc/benchmark.sh
-# Options: REPS (3), METHODS ("batch stock"), EXECUTORS (2), CORES per executor (4), DRIVER_CORES (4), RUNTIME (2.3: runtime 3.0 runs
+# Options: REPS (3), METHODS ("batch stock"), JOB_ARGS (extra job arguments, e.g. "--warmup"), EXECUTORS (2), CORES per executor (4), DRIVER_CORES (4), RUNTIME (2.3: runtime 3.0 runs
 # PySpark batches in local mode, see results), TEARDOWN (1). Output: results/runs/dataproc-bench-<stamp>/ with every
 # run's records, the batch resources (state history, DCU usage) and summary.md.
 set -e
@@ -54,7 +54,7 @@ while [ "$rep" -le "$REPS" ]; do
     gcloud dataproc batches submit pyspark "$D/spark_main.py" --project "$PROJECT" --region "$REGION" --batch "$id" \
       --version "$RUNTIME" --container-image "$IMAGE" --subnet default --deps-bucket "gs://$BUCKET" \
       --user-workload-authentication-type SERVICE_ACCOUNT --service-account "$SA" --properties "$PROPS" \
-      -- --data "gs://$BUCKET/data/m5" --out "gs://$BUCKET/bench/$STAMP" --method "$method" --run-id "$id" \
+      -- --data "gs://$BUCKET/data/m5" --out "gs://$BUCKET/bench/$STAMP" --method "$method" --run-id "$id" $JOB_ARGS \
       >> "$OUT/submit.log" 2>&1 || log "run $id FAILED (see submit.log)"
     gcloud dataproc batches describe "$id" --project "$PROJECT" --region "$REGION" --format=json > "$OUT/$id.batch.json"
     log "$id: $(python3 -c "import json; d=json.load(open('$OUT/$id.batch.json')); print(d['state'])")"
