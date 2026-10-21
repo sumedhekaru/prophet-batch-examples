@@ -284,12 +284,12 @@ def main(argv: list[str] | None = None) -> int:
         'task_records': task_records(out), 'stages': stage_metrics(sc, marks['execute_start']),
         'warmup': warmup, 'explore': variants,
     }
-    (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str))
+    (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str), encoding='utf-8')
     np.savez_compressed(local / f'{run_id}.npz', ids=np.array(r.ids), yhat=r.yhat, lower=r.lower, upper=r.upper)
     for suffix in ('json', 'npz'):
         _copy(spark, f'file://{local / f"{run_id}.{suffix}"}', f"{a.out.rstrip('/')}/{run_id}.{suffix}")
     end = local / f'{run_id}.end.json'  # results written: the rest until the platform's end time is shutdown
-    end.write_text(json.dumps({'write_end': time.time()}))
+    end.write_text(json.dumps({'write_end': time.time()}), encoding='utf-8')
     _copy(spark, f'file://{end}', f"{a.out.rstrip('/')}/{end.name}")
     print(json.dumps({'run_id': run_id, 'execute_s': execute_s, 'tasks': record['tasks']['tasks'],
                       'hosts': record['tasks']['hosts'], 'max_concurrent': record['tasks']['max_concurrent'],

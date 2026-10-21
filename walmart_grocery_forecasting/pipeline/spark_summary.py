@@ -59,12 +59,12 @@ def load(directory: Path) -> list[dict]:
     for f in sorted(directory.glob('*.json')):
         if f.name.endswith(('.end.json', '.batch.json')):
             continue
-        rec = json.loads(f.read_text())
+        rec = json.loads(f.read_text(encoding='utf-8'))
         if 'marks' not in rec:  # config.json and other non-run files
             continue
         end_f, batch_f = f.with_suffix('.end.json'), f.with_suffix('.batch.json')
-        end = json.loads(end_f.read_text()) if end_f.exists() else {'write_end': rec['marks']['write_start']}
-        batch = json.loads(batch_f.read_text()) if batch_f.exists() else None
+        end = json.loads(end_f.read_text(encoding='utf-8')) if end_f.exists() else {'write_end': rec['marks']['write_start']}
+        batch = json.loads(batch_f.read_text(encoding='utf-8')) if batch_f.exists() else None
         npz = np.load(f.with_suffix('.npz'))
         usage = ((batch or {}).get('runtimeInfo') or {}).get('approximateUsage') or {}
         dcu = int(usage['milliDcuSeconds']) / 1000 if 'milliDcuSeconds' in usage else None  # not reported by 2.x
@@ -133,4 +133,7 @@ def summarize(directory: Path) -> str:
 
 
 if __name__ == '__main__':
+    from .run import utf8_stdout
+
+    utf8_stdout()
     print(summarize(Path(sys.argv[1])), end='')

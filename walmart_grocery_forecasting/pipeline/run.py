@@ -144,7 +144,15 @@ def markdown(info: dict[str, Any], n: int, rows: list[dict[str, Any]], checks: d
     return '\n'.join(lines) + '\n'
 
 
+def utf8_stdout() -> None:
+    """Print the summaries' symbols (Δ × ± ·) on any console: Windows defaults to cp1252 when output is redirected."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
+
+
 def main() -> int:
+    utf8_stdout()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--n', type=int, default=None, help='random sample of n items (default: all)')
     p.add_argument('--serial-n', type=int, default=30, help='items timed for stock_serial (default 30)')
@@ -212,12 +220,12 @@ def main() -> int:
     stem = a.out / f"{a.env}-{a.model}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
     stem.with_suffix('.json').write_text(json.dumps(
         {'machine': info, 'args': {k: str(v) for k, v in vars(a).items()}, 'n': n, 'horizon': h, 'ids': ids,
-         'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str))
+         'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str), encoding='utf-8')
     np.savez_compressed(stem.with_suffix('.npz'), ids=np.array(ids), test_ds=test.columns.to_numpy(),
                         **{f'{r.method}_{r.workers}_{k}': aligned(r, ids, k) for r in results if r.timed_n == n
                            for k in ('yhat', 'lower', 'upper')})
     md = markdown(info, n, rows, checks)
-    stem.with_suffix('.md').write_text(md)
+    stem.with_suffix('.md').write_text(md, encoding='utf-8')
     print('\n' + md + f'\nsaved {stem}.{{json,npz,md}}')
     return 0
 
