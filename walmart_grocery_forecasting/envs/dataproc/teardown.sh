@@ -7,7 +7,7 @@ set -e
 cd "$(dirname "$0")/../../.."
 D=walmart_grocery_forecasting/envs/dataproc
 for b in $(gcloud dataproc batches list --project "$PROJECT" --region "$REGION" --format='value(name.basename())' \
-             | grep '^walmart-'); do
+             | grep -E '^(walmart|bench|diag)-'); do
   gcloud dataproc batches delete "$b" --project "$PROJECT" --region "$REGION" --quiet || true
 done
 gcloud artifacts repositories delete prophet-batch-examples --project "$PROJECT" --location "$REGION" --quiet || true
