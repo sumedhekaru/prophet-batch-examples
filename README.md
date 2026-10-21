@@ -14,7 +14,7 @@ Status: in development, private. The first use case runs locally; Docker and clo
 
 | Folder | Data | Question |
 |---|---|---|
-| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 5–9× faster than a 10-process stock pool (local, M4) |
+| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 5.6–9× faster than a 10-process stock pool (local, M4) |
 
 ## Layout
 

@@ -22,10 +22,10 @@ Local, Apple M4 (10 cores), 1,437 items, fit + forecast ([full tables](results/l
 | model | stock, 10-process pool | prophet-batch | accuracy (Δ MASE, ± 2 SE) |
 |---|---:|---:|---:|
 | default | 58.6 s | 6.5 s (9.1×) | −0.0018 ± 0.0023 |
-| + events | 68.6 s | 11.2 s (6.1×) | −0.0011 ± 0.0021 |
-| + events + SNAP | 76.9 s | 15.1 s (5.1×) | −0.0010 ± 0.0022 |
+| + events | 69.7 s | 11.3 s (6.2×) | −0.0011 ± 0.0021 |
+| + events + SNAP | 75.6 s | 13.5 s (5.6×) | −0.0010 ± 0.0022 |
 
-prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 2.9–3.5× faster.
+prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.2–3.5× faster.
 
 ## Run it
 

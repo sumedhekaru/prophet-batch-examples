@@ -1,6 +1,6 @@
 # Local run: macOS, Apple M4 (10 cores)
 
-2026-10-20 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 (PyPI) · prophet-batch 0.1.0.dev0 (`a891bd0`) ·
+2026-10-20 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 (PyPI) · prophet-batch 0.1.0.dev0 (`a891bd0`; the two holiday variants rerun at `c8d9234`) ·
 pandas 3.0.6 · numpy 2.5.4 · 1,437 M5 FOODS items, train 1,913 days, 28 days held out · 10 worker processes.
 Reproduce: `sh walmart_grocery_forecasting/envs/local/run.sh`.
 
@@ -13,10 +13,12 @@ or in exact closed form (`'analytic'`).
 | model | stock, serial¹ | stock, 10-process pool | prophet-batch, sampled history intervals | prophet-batch, analytic history intervals |
 |---|---:|---:|---:|---:|
 | default `Prophet()` | 302.5 | 58.6 | 16.5 (3.5×) | **6.5 (9.1×)** |
-| + M5 events as holidays | 383.4 | 68.6 | 23.6 (2.9×) | **11.2 (6.1×)** |
-| + events + SNAP regressors | 409.3 | 76.9 | 25.2 (3.0×) | **15.1 (5.1×)** |
+| + M5 events as holidays | 382.8 | 69.7 | 21.9 (3.2×) | **11.3 (6.2×)** |
+| + events + SNAP regressors | 402.5 | 75.6 | 23.7 (3.2×) | **13.5 (5.6×)** |
 
-Speed-ups are against the stock 10-process pool. ¹ Timed on 30 items, extrapolated.
+Speed-ups are against the stock 10-process pool. ¹ Timed on 30 items, extrapolated. The SNAP variant needs
+`make_model` (for `add_regressor`); since prophet-batch `c8d9234` identical `make_model` configs share their
+preprocessing, which took its fit from 5.6 s to 4.0 s (15.1 → 13.5 s in total).
 
 ## Accuracy on the 28 held-out days
 
