@@ -1,11 +1,14 @@
 #!/bin/sh
-# Deploy and run the use case as a Cloud Run job (not yet run on GCP). Needs gcloud, Docker, and:
-#   PROJECT  GCP project id          REGION  e.g. us-central1          BUCKET  bucket name (created if missing)
-#   MODEL    default | events | events_snap (default: default)
-#   PROJECT=my-project REGION=us-central1 BUCKET=my-bucket sh walmart_grocery_forecasting/envs/cloudrun_job/deploy.sh
+# Deploy and run the use case as a Cloud Run job. Needs gcloud (logged in), Docker, and:
+#   PROJECT  GCP project id      REGION  e.g. us-east1      BUCKET  bucket name (created if missing)
+#   MODELS   variants to run, in order (default: "default events events_snap")
+#   CPU / MEMORY  job size (default 4 vCPU / 8Gi: enough for 1,437 items; the pool uses one worker per vCPU)
+#   PROJECT=my-project REGION=us-east1 BUCKET=my-bucket sh walmart_grocery_forecasting/envs/cloudrun_job/deploy.sh
+# Results: gs://$BUCKET/results/ (copied to results/runs/ at the end). Remove everything with teardown.sh.
 set -e
 : "${PROJECT:?set PROJECT}" "${REGION:?set REGION}" "${BUCKET:?set BUCKET}"
-MODEL="${MODEL:-default}"
+MODELS="${MODELS:-default events events_snap}"
+CPU="${CPU:-4}" MEMORY="${MEMORY:-8Gi}"
 cd "$(dirname "$0")/../../.."
 REPO="$REGION-docker.pkg.dev/$PROJECT/prophet-batch-examples"
 IMAGE="$REPO/walmart:$(git rev-parse --short HEAD)"
@@ -15,19 +18,25 @@ gcloud artifacts repositories describe prophet-batch-examples --project "$PROJEC
   || gcloud artifacts repositories create prophet-batch-examples --project "$PROJECT" --location "$REGION" \
        --repository-format docker
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-TAG="$IMAGE" sh walmart_grocery_forecasting/envs/cloudrun_job/build.sh
-docker push "$IMAGE"
+TAG="$IMAGE" sh walmart_grocery_forecasting/envs/cloudrun_job/build.sh -q
+docker push -q "$IMAGE"
 
 # 2. Data: the verified M5 archive in the bucket (the job extracts what it needs on first run)
 gcloud storage buckets describe "gs://$BUCKET" --project "$PROJECT" >/dev/null 2>&1 \
-  || gcloud storage buckets create "gs://$BUCKET" --project "$PROJECT" --location "$REGION"
+  || gcloud storage buckets create "gs://$BUCKET" --project "$PROJECT" --location "$REGION" \
+       --uniform-bucket-level-access
 gcloud storage cp -n data/m5/m5.zip "gs://$BUCKET/data/m5/m5.zip"
 
-# 3. Job: 8 vCPU / 32 GiB, one task; the bucket is a volume at /mnt/gcs
+# 3. Job: one task; the bucket is a volume at /mnt/gcs
 gcloud run jobs deploy walmart-forecast --project "$PROJECT" --region "$REGION" --image "$IMAGE" \
-  --cpu 8 --memory 32Gi --tasks 1 --max-retries 0 --task-timeout 3600 \
+  --cpu "$CPU" --memory "$MEMORY" --tasks 1 --max-retries 0 --task-timeout 3600 \
   --add-volume name=gcs,type=cloud-storage,bucket="$BUCKET" --add-volume-mount volume=gcs,mount-path=/mnt/gcs \
-  --set-env-vars DATA_DIR=/mnt/gcs/data/m5,OUT_DIR=/mnt/gcs/results,RUN_ENV=cloudrun \
-  --args=--model,"$MODEL"
-gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --wait
-echo "results: gs://$BUCKET/results/"
+  --set-env-vars DATA_DIR=/mnt/gcs/data/m5,OUT_DIR=/mnt/gcs/results,RUN_ENV=cloudrun
+
+# 4. One execution per model variant, then the results back to results/runs/
+for model in $MODELS; do
+  echo "== $model"
+  gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --args=--model,"$model" --wait
+done
+mkdir -p walmart_grocery_forecasting/results/runs
+gcloud storage cp "gs://$BUCKET/results/*" walmart_grocery_forecasting/results/runs/
