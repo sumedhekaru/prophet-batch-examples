@@ -18,6 +18,8 @@ COPY walmart_grocery_forecasting/pipeline/ $SITE/walmart_grocery_forecasting/pip
 ARG EXAMPLES_COMMIT=unknown
 ARG PROPHET_BATCH_COMMIT=unknown
 ENV EXAMPLES_COMMIT=$EXAMPLES_COMMIT PROPHET_BATCH_COMMIT=$PROPHET_BATCH_COMMIT PYSPARK_PYTHON=/usr/local/bin/python3
+# One BLAS thread per Python worker: each executor runs one worker per core.
+ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 
 RUN groupadd -g 1099 spark && useradd -u 1099 -g 1099 -d /home/spark -m spark
 USER spark

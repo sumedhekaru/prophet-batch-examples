@@ -2,9 +2,11 @@
 
     spark-submit spark_main.py --data gs://BUCKET/data/m5 --out gs://BUCKET/results [--groups 16]
 
-  stock  groupBy(item).applyInPandas: Prophet().fit + predict for each item, the usual Spark pattern
   batch  items hashed into --groups groups; groupBy(group).applyInPandas: fit_many + predict_many on each group, so
          every task fits many series at once (history_uncertainty='analytic', only the interval columns returned)
+  stock  groupBy(item).applyInPandas: Prophet().fit + predict for each item, the usual Spark pattern; on a random
+         sample of --stock-n items (it is slow), timed and extrapolated; accuracy compared on that sample
+The driver first waits for the executors (and stops if none arrive), then runs batch, then stock.
 Both forecast history + 28 days, as in run.py; times are the wall time of each Spark job (data shuffled in, results
 collected). Forecasts are seeded per series, so prophet-batch's match a local run's whatever the grouping.
 """
@@ -85,6 +87,12 @@ def _to_result(method: str, out: pd.DataFrame, seconds: float, workers: int) -> 
                              'task_predict_s': float(out.groupby('unique_id')['predict_s'].first().sum())})
 
 
+def _subset(r: Result, ids: list[str]) -> Result:
+    pos = [r.ids.index(s) for s in ids]
+    return Result(r.method, r.workers, list(ids), r.yhat[pos], r.lower[pos], r.upper[pos], r.lp[pos], r.fit_s,
+                  r.predict_s, len(ids), r.extra)
+
+
 def _copy(spark, src: str, dst: str) -> None:
     """Copy a file between the local disk and gs:// through Spark's Hadoop filesystem (GCS connector)."""
     jvm = spark._jvm
@@ -105,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--data', required=True, help='directory with sales_train_evaluation.csv and calendar.csv')
     p.add_argument('--out', required=True, help='directory for the results')
     p.add_argument('--groups', type=int, default=16, help='item groups for prophet-batch (default 16)')
+    p.add_argument('--stock-n', type=int, default=300, help='items for the stock run (default 300)')
+    p.add_argument('--wait', type=int, default=600, help='seconds to wait for executors (default 600)')
     a = p.parse_args(argv)
 
     spark = SparkSession.builder.appName('walmart-grocery-forecasting').getOrCreate()
@@ -117,29 +127,48 @@ def main(argv: list[str] | None = None) -> int:
     long_df['group'] = [zlib.crc32(s.encode()) % a.groups for s in long_df['unique_id']]
     sdf = spark.createDataFrame(long_df).cache()
     sdf.count()
-    cores = int(spark.conf.get('spark.executor.instances', '1')) * int(spark.conf.get('spark.executor.cores', '1'))
-    print(f'{len(train):,} items; {a.groups} groups; executor cores {cores}', flush=True)
+    expected = int(spark.conf.get('spark.executor.instances', '1'))
+    cores = expected * int(spark.conf.get('spark.executor.cores', '1'))
+    tracker = spark.sparkContext._jsc.sc().statusTracker()
+    t0 = time.perf_counter()
+    while True:
+        up = len(tracker.getExecutorInfos()) - 1  # minus the driver
+        if up >= expected or time.perf_counter() - t0 > a.wait:
+            break
+        time.sleep(5)
+    print(f'{len(train):,} items; {a.groups} groups; executors up {up}/{expected} after '
+          f'{time.perf_counter() - t0:.0f} s', flush=True)
+    if up == 0:
+        raise SystemExit('no executors started; stopping')
 
+    rng = np.random.default_rng(0)
+    sample = sorted(str(x) for x in rng.choice(list(train.index), size=min(a.stock_n, len(train)), replace=False))
     results = []
-    for method, run in (
-            ('spark_stock_per_item', lambda: sdf.groupBy('unique_id').applyInPandas(stock_item, OUT_SCHEMA)),
-            ('spark_batch_per_group', lambda: sdf.groupBy('group').applyInPandas(batch_group, OUT_SCHEMA))):
+    for method, run, n_items in (
+            ('spark_batch_per_group',
+             lambda: sdf.groupBy('group').applyInPandas(batch_group, OUT_SCHEMA), len(train)),
+            ('spark_stock_per_item',
+             lambda: sdf.filter(sdf.unique_id.isin(sample)).groupBy('unique_id')
+                        .applyInPandas(stock_item, OUT_SCHEMA), len(sample))):
+        print(f'{method}: started ({n_items} items)', flush=True)
         t0 = time.perf_counter()
         out = run().toPandas()
         seconds = time.perf_counter() - t0
         results.append(_to_result(method, out, seconds, cores))
-        print(f'{method}: {seconds:.1f} s', flush=True)
+        print(f'{method}: {seconds:.1f} s for {n_items} items', flush=True)
 
-    stock, batch = results
-    acc = {r.method: evaluate(r, train, test) for r in results}
-    ids = list(train.index)
+    batch, stock = results
+    stock_full_s = stock.total_s * len(train) / len(sample)
+    ids = sample
+    sub = train.loc[ids], test.loc[ids]
+    acc = {r.method: evaluate(_subset(r, ids), *sub) for r in results}
     gain = batch.lp[[batch.ids.index(s) for s in ids]] - stock.lp[[stock.ids.index(s) for s in ids]]
     report = {
         'machine': {**machine_info(), 'spark': spark.version,
                     'executor_instances': spark.conf.get('spark.executor.instances', None),
                     'executor_cores': spark.conf.get('spark.executor.cores', None)},
-        'n': len(ids), 'groups': a.groups,
-        'seconds': {r.method: r.total_s for r in results},
+        'n': len(train), 'stock_n': len(sample), 'groups': a.groups, 'executors_up': up,
+        'seconds': {r.method: r.total_s for r in results}, 'stock_seconds_extrapolated': stock_full_s,
         'task_seconds': {r.method: r.extra for r in results},
         'accuracy': {k: v['summary'] for k, v in acc.items()},
         'mase_vs_stock': paired(acc[stock.method]['per_series']['mase'], acc[batch.method]['per_series']['mase']),
@@ -147,24 +176,23 @@ def main(argv: list[str] | None = None) -> int:
     }
     s, b, d = acc[stock.method]['summary'], acc[batch.method]['summary'], report['mase_vs_stock']
     md = '\n'.join([
-        f"# walmart_grocery_forecasting on Spark {spark.version}: {len(ids):,} M5 FOODS items, 28-day holdout", '',
+        f"# walmart_grocery_forecasting on Spark {spark.version}: {len(train):,} M5 FOODS items, 28-day holdout", '',
         f"{report['machine']['timestamp']} · executors {report['machine']['executor_instances']} × "
         f"{report['machine']['executor_cores']} cores · prophet {report['machine']['versions']['prophet']} · "
         f"prophet-batch {report['machine']['commits']['prophet-batch']} · {a.groups} groups", '',
-        '| method | wall s | vs stock | WAPE | MASE | 80% coverage |', '|---|---:|---:|---:|---:|---:|',
-        f"| stock, one item per task | {stock.total_s:.1f} | 1.0× | {s['wape']:.4f} | {s['mase']:.4f} | "
-        f"{s['coverage']:.3f} |",
-        f"| prophet-batch, fit_many per group | {batch.total_s:.1f} | {stock.total_s / batch.total_s:.1f}× | "
-        f"{b['wape']:.4f} | {b['mase']:.4f} | {b['coverage']:.3f} |", '',
+        f"| method | wall s, all {len(train):,} items | vs stock |", '|---|---:|---:|',
+        f"| stock, one item per task (timed on {len(sample)}, extrapolated) | {stock_full_s:.1f} | 1.0× |",
+        f"| prophet-batch, fit_many per group | {batch.total_s:.1f} | {stock_full_s / batch.total_s:.1f}× |", '',
+        f"Accuracy on the {len(sample)} stock items: WAPE {s['wape']:.4f} / {b['wape']:.4f}, MASE {s['mase']:.4f} / "
+        f"{b['mase']:.4f}, 80% coverage {s['coverage']:.3f} / {b['coverage']:.3f} (stock / prophet-batch); "
         f"Δ MASE {d['mean']:+.4f} ± {2 * d['se']:.4f}; log posterior ≥ Stan's on "
-        f"{100 * report['lp_ge_stan_share']:.1f}% of items.", ''])
+        f"{100 * report['lp_ge_stan_share']:.1f}% of them.", ''])
     print(md, flush=True)
-    stem = f"spark-default-{len(ids)}-{datetime.now():%Y%m%d-%H%M%S}"
+    stem = f"spark-default-{len(train)}-{datetime.now():%Y%m%d-%H%M%S}"
     (local / f'{stem}.json').write_text(json.dumps(report, indent=1, default=str))
     (local / f'{stem}.md').write_text(md)
-    np.savez_compressed(local / f'{stem}.npz', ids=np.array(ids),
-                        **{f'{r.method}_{k}': getattr(r, k)[[r.ids.index(s) for s in ids]]
-                           for r in results for k in ('yhat', 'lower', 'upper')})
+    np.savez_compressed(local / f'{stem}.npz', ids=np.array(batch.ids), stock_ids=np.array(stock.ids),
+                        **{f'{r.method}_{k}': getattr(r, k) for r in results for k in ('yhat', 'lower', 'upper')})
     for suffix in ('json', 'md', 'npz'):
         _copy(spark, f'file://{local / f"{stem}.{suffix}"}', f"{a.out.rstrip('/')}/{stem}.{suffix}")
     spark.stop()

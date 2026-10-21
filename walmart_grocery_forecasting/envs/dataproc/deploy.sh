@@ -1,12 +1,13 @@
 #!/bin/sh
 # Run the use case as a Dataproc Serverless batch (PySpark, custom container). Needs gcloud (logged in), Docker, and
 #   PROJECT  REGION  BUCKET   (bucket created if missing)
-#   EXECUTORS / CORES  executor count and cores each (default 2 × 4; Serverless allows 4, 8 or 16 cores); GROUPS (16)
+#   EXECUTORS / CORES  executor count and cores each (default 2 × 4; Serverless allows 4, 8 or 16 cores)
+#   ITEM_GROUPS (16), STOCK_N (300: items for the stock run, extrapolated)
 # Serverless needs Private Google Access on the subnet (default network); turned on here if off, and teardown.sh turns
 # it back off (it records the original state in .pga-was-off). Results: gs://$BUCKET/results/ → results/runs/.
 set -e
 : "${PROJECT:?set PROJECT}" "${REGION:?set REGION}" "${BUCKET:?set BUCKET}"
-EXECUTORS="${EXECUTORS:-2}" CORES="${CORES:-4}" GROUPS_="${GROUPS:-16}"
+EXECUTORS="${EXECUTORS:-2}" CORES="${CORES:-4}" ITEM_GROUPS="${ITEM_GROUPS:-16}" STOCK_N="${STOCK_N:-300}"
 cd "$(dirname "$0")/../../.."
 D=walmart_grocery_forecasting/envs/dataproc
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/prophet-batch-examples/walmart-spark:$(git rev-parse --short HEAD)"
@@ -41,6 +42,6 @@ gcloud dataproc batches submit pyspark "$D/spark_main.py" --project "$PROJECT" -
   --batch "walmart-$(date +%Y%m%d-%H%M%S)" --version 3.0 --container-image "$IMAGE" --subnet default \
   --deps-bucket "gs://$BUCKET" --user-workload-authentication-type SERVICE_ACCOUNT --service-account "$SA" \
   --properties "spark.dynamicAllocation.enabled=false,spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.driver.cores=4" \
-  -- --data "gs://$BUCKET/data/m5" --out "gs://$BUCKET/results" --groups "$GROUPS_"
+  -- --data "gs://$BUCKET/data/m5" --out "gs://$BUCKET/results" --groups "$ITEM_GROUPS" --stock-n "$STOCK_N"
 mkdir -p walmart_grocery_forecasting/results/runs
 gcloud storage cp "gs://$BUCKET/results/*" walmart_grocery_forecasting/results/runs/
