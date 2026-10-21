@@ -2,13 +2,13 @@
 # Reproducible Spark benchmark on Dataproc Serverless (track F5): stock vs prophet-batch, one method per batch,
 # REPS repetitions in alternating order, every phase timed (see pipeline/spark_summary.py), then teardown.
 #   PROJECT=... REGION=... BUCKET=... sh walmart_grocery_forecasting/envs/dataproc/benchmark.sh
-# Options: REPS (3), EXECUTORS (2), CORES per executor (4), DRIVER_CORES (4), RUNTIME (2.3: runtime 3.0 runs
+# Options: REPS (3), METHODS ("batch stock"), EXECUTORS (2), CORES per executor (4), DRIVER_CORES (4), RUNTIME (2.3: runtime 3.0 runs
 # PySpark batches in local mode, see results), TEARDOWN (1). Output: results/runs/dataproc-bench-<stamp>/ with every
 # run's records, the batch resources (state history, DCU usage) and summary.md.
 set -e
 : "${PROJECT:?set PROJECT}" "${REGION:?set REGION}" "${BUCKET:?set BUCKET}"
 REPS="${REPS:-3}" EXECUTORS="${EXECUTORS:-2}" CORES="${CORES:-4}" DRIVER_CORES="${DRIVER_CORES:-4}"
-RUNTIME="${RUNTIME:-2.3}" TEARDOWN="${TEARDOWN:-1}"
+RUNTIME="${RUNTIME:-2.3}" TEARDOWN="${TEARDOWN:-1}" METHODS="${METHODS:-batch stock}"
 cd "$(dirname "$0")/../../.."
 D=walmart_grocery_forecasting/envs/dataproc
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -45,7 +45,8 @@ JSON
 # Runs: one method per batch, alternating order
 rep=1
 while [ "$rep" -le "$REPS" ]; do
-  if [ $((rep % 2)) -eq 1 ]; then order="batch stock"; else order="stock batch"; fi
+  # alternate the order between repetitions
+  if [ $((rep % 2)) -eq 1 ]; then order="$METHODS"; else order=$(echo $METHODS | awk '{for (i = NF; i > 0; i--) printf "%s ", $i}'); fi
   for method in $order; do
     id="bench-$STAMP-r$rep-$method"
     id=$(echo "$id" | tr 'A-Z' 'a-z')

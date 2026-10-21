@@ -100,6 +100,41 @@ def task_stats(out: pd.DataFrame, execute_s: float, cores: int) -> dict:
             'per_host_tasks': {str(h): int(n) for h, n in tasks['host'].value_counts().items()}}
 
 
+def task_records(out: pd.DataFrame) -> list[dict]:
+    """One record per task: host, pid, start, end, items processed."""
+    g = out.groupby(['host', 'pid', 't0', 't1'])['unique_id'].nunique().reset_index(name='items')
+    return g.sort_values('t0').to_dict('records')
+
+
+def stage_metrics(sc, since: float) -> list[dict] | str:
+    """Spark's own per-stage metrics (REST API of the driver's UI) for stages submitted after `since` (epoch s)."""
+    import urllib.request
+    from datetime import datetime
+
+    try:
+        url = f'{sc.uiWebUrl}/api/v1/applications/{sc.applicationId}/stages'
+        with urllib.request.urlopen(url, timeout=10) as r:
+            stages = json.load(r)
+    except Exception as e:  # UI disabled or unreachable
+        return f'unavailable: {e}'
+
+    def ts(v: str | None) -> float | None:
+        return datetime.strptime(v, '%Y-%m-%dT%H:%M:%S.%f%Z').timestamp() if v else None
+
+    keep = ('stageId', 'name', 'status', 'numTasks', 'executorRunTime', 'executorCpuTime', 'executorDeserializeTime',
+            'jvmGcTime', 'resultSerializationTime', 'shuffleReadBytes', 'shuffleWriteBytes', 'shuffleWriteTime',
+            'inputBytes', 'outputBytes')
+    out = []
+    for st in stages:
+        sub, done = ts(st.get('submissionTime')), ts(st.get('completionTime'))
+        if sub is None or sub < since - 1:
+            continue
+        rec = {k: st.get(k) for k in keep}
+        rec.update(submitted=sub, completed=done, duration=(done - sub) if done else None)
+        out.append(rec)
+    return sorted(out, key=lambda r: r['submitted'])
+
+
 def _copy(spark, src: str, dst: str) -> None:
     """Copy a file between the local disk and a Hadoop filesystem URI (gs://, file://) through Spark."""
     jvm = spark._jvm
@@ -191,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         'machine': machine_info(), 'tasks': task_stats(out, execute_s, cores),
         'accuracy': acc['summary'], 'per_series': {k: v.tolist() for k, v in acc['per_series'].items()},
         'lp': r.lp.tolist(), 'ids': r.ids,
+        'task_records': task_records(out), 'stages': stage_metrics(sc, marks['execute_start']),
     }
     (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str))
     np.savez_compressed(local / f'{run_id}.npz', ids=np.array(r.ids), yhat=r.yhat, lower=r.lower, upper=r.upper)
