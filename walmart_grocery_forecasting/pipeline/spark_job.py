@@ -123,13 +123,19 @@ def task_records(out: pd.DataFrame) -> list[dict]:
     return g.sort_values('t0').to_dict('records')
 
 
-def warm(_: object) -> list[tuple]:
-    """Warm-up task: start the Python worker and import prophet-batch (and Prophet) before the timed work."""
+WARM_SCHEMA = 'host string, pid int, proc_start double, module_loaded double, t0 double, t1 double'
+
+
+def warm(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Warm-up task (a pandas UDF, so it starts the same Python worker pool as the timed work): import
+    prophet-batch and Prophet before execute.
+    """
     t0 = time.time()
     import prophet_batch  # noqa: F401
 
     time.sleep(1.0)  # long enough that every worker slot gets one task
-    return [(socket.gethostname(), os.getpid(), PROCESS_START, MODULE_LOADED, t0, time.time())]
+    return pd.DataFrame([{'host': socket.gethostname(), 'pid': os.getpid(), 'proc_start': PROCESS_START,
+                          'module_loaded': MODULE_LOADED, 't0': t0, 't1': time.time()}])
 
 
 def stage_metrics(sc, since: float) -> list[dict] | str:
@@ -232,11 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     marks['load_done'] = time.time()
     warmup = None
     if a.warmup or explore:
-        rows = sc.parallelize(range(2 * cores), 2 * cores).flatMap(warm).collect()
+        rows = spark.range(cores).groupBy('id').applyInPandas(warm, WARM_SCHEMA).toPandas()
         marks['warmup_done'] = time.time()
-        warmup = {'seconds': marks['warmup_done'] - marks['load_done'],
-                  'workers': [dict(zip(('host', 'pid', 'proc_start', 'module_loaded', 't0', 't1'), r)) for r in rows]}
-        print(f"warmup {warmup['seconds']:.1f} s; {len({(r[0], r[1]) for r in rows})} Python workers", flush=True)
+        warmup = {'seconds': marks['warmup_done'] - marks['load_done'], 'workers': rows.to_dict('records')}
+        print(f"warmup {warmup['seconds']:.1f} s; {rows[['host', 'pid']].drop_duplicates().shape[0]} Python workers",
+              flush=True)
     variants = []
     for g in explore:
         t0 = time.time()
