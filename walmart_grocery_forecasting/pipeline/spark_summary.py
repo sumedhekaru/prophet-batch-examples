@@ -9,6 +9,7 @@ create time, state history, end time, DCU usage). Phases (seconds):
   driver_start  RUNNING → Spark session ready in the driver    (Dataproc only)
   executors     session ready → requested executors registered
   load          executors ready → data copied, loaded, cached
+  warmup        Python workers started and Prophet imported on every core (--warmup; else –)
   execute       the method's Spark job: data in, models fit + forecast, results collected   ← speed-up basis
   post          results collected → accuracy computed, outputs written
   shutdown      outputs written → batch finished (Spark stop, platform teardown; Dataproc only)
@@ -24,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-PHASES = ['provision', 'driver_start', 'executors', 'load', 'execute', 'post', 'shutdown', 'end_to_end']
+PHASES = ['provision', 'driver_start', 'executors', 'load', 'warmup', 'execute', 'post', 'shutdown', 'end_to_end']
 
 
 def _ts(s: str) -> float:
@@ -36,6 +37,7 @@ def run_phases(rec: dict, end: dict, batch: dict | None) -> dict[str, float | No
     p: dict[str, float | None] = dict.fromkeys(PHASES)
     p['executors'] = m['executors_ready'] - m['session_ready']
     p['load'] = m['load_done'] - m['executors_ready']
+    p['warmup'] = m['warmup_done'] - m['load_done'] if 'warmup_done' in m else None
     p['execute'] = m['execute_end'] - m['execute_start']
     p['post'] = end['write_end'] - m['execute_end']
     if batch:
