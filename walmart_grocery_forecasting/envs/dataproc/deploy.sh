@@ -10,6 +10,9 @@ EXECUTORS="${EXECUTORS:-2}" CORES="${CORES:-4}" GROUPS_="${GROUPS:-16}"
 cd "$(dirname "$0")/../../.."
 D=walmart_grocery_forecasting/envs/dataproc
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/prophet-batch-examples/walmart-spark:$(git rev-parse --short HEAD)"
+# Runtime 3.0 runs workloads with end-user credentials by default (needs an extra OAuth consent); run as the
+# project's default compute service account instead (SA overrides it).
+SA="${SA:-$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
 
 # 0. Network: Private Google Access on the default subnet
 if [ "$(gcloud compute networks subnets describe default --project "$PROJECT" --region "$REGION" \
@@ -36,7 +39,7 @@ gcloud storage cp -n data/m5/sales_train_evaluation.csv data/m5/calendar.csv "gs
 # 3. Batch: fixed size (no autoscaling); waits and streams the driver output
 gcloud dataproc batches submit pyspark "$D/spark_main.py" --project "$PROJECT" --region "$REGION" \
   --batch "walmart-$(date +%Y%m%d-%H%M%S)" --version 3.0 --container-image "$IMAGE" --subnet default \
-  --deps-bucket "gs://$BUCKET" \
+  --deps-bucket "gs://$BUCKET" --user-workload-authentication-type SERVICE_ACCOUNT --service-account "$SA" \
   --properties "spark.dynamicAllocation.enabled=false,spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.driver.cores=4" \
   -- --data "gs://$BUCKET/data/m5" --out "gs://$BUCKET/results" --groups "$GROUPS_"
 mkdir -p walmart_grocery_forecasting/results/runs
