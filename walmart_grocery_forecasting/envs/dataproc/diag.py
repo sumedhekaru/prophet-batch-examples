@@ -24,7 +24,7 @@ def main():
     t_session = time.time()
     tracker = sc._jsc.sc().statusTracker()
     seen = []
-    for _ in range(36):  # up to 3 minutes for executors to register
+    for _ in range(0 if sc.master.startswith('local') else 36):  # up to 3 minutes for executors
         seen.append(len(tracker.getExecutorInfos()) - 1)
         if seen[-1] >= int(sc.getConf().get('spark.executor.instances', '0') or 0) > 0:
             break
