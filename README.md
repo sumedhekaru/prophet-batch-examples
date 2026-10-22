@@ -16,6 +16,7 @@ Status: in development. The first use case runs locally, in a local Linux contai
 |---|---|---|
 | [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 7.4–11× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run, Spark, Windows) |
 | [public_datasets](public_datasets/) | M5 item and item × store, M4 Daily / Weekly / Hourly, Tourism Monthly: 38,905 series | Same accuracy and a better fit than Stan across six datasets and four frequencies; speed at scale (30,490 series) |
+| [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB) | A file of any size forecast in batches, read / forecast / write at the same time, with flat memory and restartable output (needs prophet-batch 0.1.2) |
 
 ## Layout
 
