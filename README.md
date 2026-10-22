@@ -33,8 +33,8 @@ walmart_grocery_forecasting/
 
 ## Setup
 
-Needs [uv](https://docs.astral.sh/uv/) and, for now, a clone of prophet-batch next to this repo (it moves to PyPI
-later):
+Needs [uv](https://docs.astral.sh/uv/) and a clone of prophet-batch next to this repo, so the examples run its latest
+code (prophet-batch itself is on PyPI: `pip install prophet-batch`):
 
 ```
 git clone https://github.com/sumedhekaru/prophet-batch.git
