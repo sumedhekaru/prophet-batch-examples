@@ -1,3 +1,5 @@
+> **Pre-release record (history).** Made on 2026-10-21 with prophet-batch 0.1.0.dev0 from a local checkout (commit `9dc042e`, recorded as `d4f7824` before a history correction), before releases were on PyPI. Current results, on prophet-batch from PyPI: [dataproc-us-east1.md](../dataproc-us-east1.md).
+
 # Spark benchmark: dataproc-bench-20261021-213536
 
 6 runs · 1,437 items · Spark 3.5.3 · master `spark://gdpic-srvls-batch-5a219360-3f03-407f-9de7-ffd0c479508a-m:7077` · 2 executors, parallelism 8 · shuffle partitions 32 · prophet 1.5.0 · prophet-batch d4f7824 · examples 3d0d154

@@ -1,26 +1,27 @@
 # Cloud Run job, us-east1 (4 vCPU, 8 GiB)
 
-2026-10-21 · Cloud Run job, one task, 4 vCPU / 8 GiB, us-east1 · image built from examples `d120a54` (linux/amd64,
-Python 3.12.15, prophet 1.5.0, prophet-batch `d4f7824`) · data and results on a Cloud Storage bucket mounted as a volume
-· 1,437 M5 FOODS items, 28 days held out. Reproduce: [envs/cloudrun_job](../envs/cloudrun_job/) (`deploy.sh`, then
-`teardown.sh`). Each model variant is one execution on a fresh machine; inside it every method runs one after another.
+2026-10-22 · Cloud Run job, one task, 4 vCPU / 8 GiB, us-east1 · image built from examples `05e472d` (linux/amd64,
+Python 3.12.15, prophet 1.5.0 and **prophet-batch 0.1.1 from PyPI**) · data and results on a Cloud Storage bucket
+mounted as a volume · 1,437 M5 FOODS items, 28 days held out · **3 repetitions** of every model variant, each an
+execution on a fresh instance: median (min–max). Reproduce: [envs/cloudrun_job](../envs/cloudrun_job/)
+(`REPS=3 … deploy.sh`, then `teardown.sh`). Every table: [cloudrun-bench-20261022-001224.md](cloudrun-bench-20261022-001224.md).
 
-## Speed: seconds for all 1,437 items (fit + forecast)
+## Speed: seconds for all 1,437 items (fit + forecast), median of 3
 
-| model | workers | stock, serial¹ | stock, process pool | prophet-batch, sampled history intervals | prophet-batch, analytic history intervals |
-|---|---:|---:|---:|---:|---:|
-| default `Prophet()` | 5 | 947.3 | 265.7 | 85.9 (3.1×) | **25.1 (10.6×)** |
-| + M5 events as holidays | 5 | 1,195.4 | 382.7 | 102.2 (3.7×) | **37.1 (10.3×)** |
-| + events + SNAP regressors | 6 | 1,333.8 | 340.4 | 88.9 (3.8×) | **38.8 (8.8×)** |
+| model | stock, serial¹ | stock, process pool | prophet-batch, sampled history intervals | prophet-batch, analytic history intervals |
+|---|---:|---:|---:|---:|
+| default `Prophet()` | 939.3 | 254.4 | 83.9 (3.1×) | **23.6 (10.9×, 10.4–11.0)** |
+| + M5 events as holidays | 1,263.1 | 310.6 | 79.3 (3.9×) | **28.0 (11.1×, 10.5–11.2)** |
+| + events + SNAP regressors | 1,346.8 | 397.8 | 107.5 (3.7×) | **44.9 (8.9×, 8.8–9.0)** |
 
-¹ Timed on 30 items, extrapolated. Speed-ups are against the stock pool with the same worker count. Cloud Run's cores
-are ≈ 3× slower than the M4's (stock serial: 660 vs 200 ms per series); the speed-ups are close to the M4's (10.2× /
-10.3× / 8.6×).
+¹ Timed on 30 items, extrapolated. Speed-ups are against the stock pool of the same execution, which uses the same
+worker count. Cloud Run's cores are ≈ 3× slower than the M4's; the speed-ups are close to the M4's (10.2× / 10.4× /
+8.9×).
 
-**Workers.** The job gets a CFS quota of ≈ 3.7–3.9 CPUs (cgroup v1, `cfs_quota_us` 322600–394500 per 100000) on a
-machine showing 5–6 CPUs. prophet-batch's `n_jobs=-1` resolves this to 4 (checked in the job), but the pipeline's
-worker default then read only cgroup v2 and used 5–6 workers, for stock and prophet-batch alike: slightly
-oversubscribed, fair, a little slower than necessary. Fixed afterwards (the default now reads v1 too).
+**Workers.** The pool and `n_jobs=-1` both use the CPUs the job may use (its CFS quota, cgroup v1). A "4 vCPU" job
+landed on two instance shapes: 5 logical CPUs with a quota of 4 (6 of the 9 executions) or 6 logical CPUs with a quota
+of 5 (default: repetition 1; events: repetitions 2–3). Times in the table mix the two; the per-execution tables are in
+the full summary.
 
 ## Accuracy on the 28 held-out days
 
@@ -33,7 +34,14 @@ oversubscribed, fair, a little slower than necessary. Fixed afterwards (the defa
 prophet-batch's accuracy is the same to the last digit as on macOS and in the arm64 container; stock's moves slightly
 between platforms (Stan's stopping point).
 
-## Checks (all variants)
+## Checks (every execution)
 
-Forecasts bit-identical for `n_jobs=1` and 5 (6); every fit's log posterior ≥ Stan's (1,437 / 1,437); no fallbacks.
-All GCP resources were deleted after the runs (`teardown.sh`).
+- Forecasts bit-identical for `n_jobs=1` and the job's worker count; every fit's log posterior ≥ Stan's (1,437 /
+  1,437); no fallbacks.
+- Across repetitions: identical on the same instance shape; between the two shapes prophet-batch differs by at most
+  4.4·10⁻¹⁰ and stock by 1.1·10⁻¹³ (different hosts; the `n_jobs=1` path differs the same way, so it is the hardware,
+  not the worker count).
+- All GCP resources were deleted after the runs (`teardown.sh`).
+
+History: the pre-release run (0.1.0.dev0, one execution per variant, 5–6 workers because the worker default then
+missed cgroup v1) gave 10.6× / 10.3× / 8.8×: [history/cloudrun-us-east1.md](history/cloudrun-us-east1.md).

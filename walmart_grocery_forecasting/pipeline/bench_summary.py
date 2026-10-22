@@ -33,8 +33,15 @@ def _stat(xs: list[float], fmt: str = '{:,.1f}') -> str:
 
 
 def _forecasts(path: Path) -> dict[str, np.ndarray]:
+    """Forecast arrays keyed by method and column, without the worker count (it can differ between repetitions)."""
     with np.load(path) as z:
-        return {k: z[k] for k in z.files if k.startswith(('stock_pool', 'batch'))}
+        out = {}
+        for k in z.files:
+            if k.startswith(('stock_pool', 'batch')):
+                method, workers, col = k.rsplit('_', 2)
+                if method == 'stock_pool' or workers == '1':  # batch: n_jobs=1 (bit-identical to n_jobs=many)
+                    out[f'{method}_{col}'] = z[k]
+        return out
 
 
 def load(d: Path) -> dict[str, list[dict[str, Any]]]:
@@ -63,8 +70,9 @@ def summary(d: Path) -> str:
     lines += ['## Speed: seconds for all items (fit + forecast), median (min–max) over repetitions', '']
     for m in models:
         rs = runs[m]
-        workers = max(row['workers'] for row in rs[0]['rows'])
-        lines += [f'### {MODEL_LABEL.get(m, m)} ({workers} workers)', '',
+        per_rep = [max(row['workers'] for row in r['rows']) for r in rs]
+        workers = f'{per_rep[0]} workers' if len(set(per_rep)) == 1 else f"workers {'/'.join(map(str, per_rep))} by repetition"
+        lines += [f'### {MODEL_LABEL.get(m, m)} ({workers})', '',
                   '| method | workers | fit s | forecast s | total s | vs stock pool |', '|---|---:|---:|---:|---:|---:|']
         for i, row in enumerate(rs[0]['rows']):
             same = [r['rows'][i] for r in rs]
@@ -75,7 +83,8 @@ def summary(d: Path) -> str:
                          f"{_stat([x['predict_s'] for x in same])} | {_stat([x['total_s'] for x in same])} | "
                          f"{_stat(speed, '{:.1f}')}× |")
         lines.append('')
-    lines += ['¹ Timed on a sample (30 items), extrapolated.', '']
+    lines += ['¹ Timed on a sample (30 items), extrapolated. With different worker counts by repetition, the workers '
+              'column shows the first repetition\'s.', '']
 
     lines += ['## Accuracy on the 28 held-out days (first repetition)', '',
               '| model | method | WAPE | sMAPE | MASE | Δ MASE vs stock (± 2 SE) | 80% coverage |',
@@ -98,13 +107,14 @@ def summary(d: Path) -> str:
         lp = min(float(r['checks'][k]) for r in rs for k in keys if k.startswith('log posterior ≥'))
         fb = sorted({r['checks']['series fit by Stan (fallbacks)'] for r in rs})
         base = _forecasts(rs[0]['_npz'])
-        repeat: dict[str, bool] = {}
+        diff: dict[str, float] = {}
         for r in rs[1:]:
             other = _forecasts(r['_npz'])
             for k, v in base.items():
                 kind = 'stock' if k.startswith('stock') else 'prophet-batch'
-                repeat[kind] = repeat.get(kind, True) and k in other and np.array_equal(v, other[k])
-        rep = ', '.join(f"{k} {'identical' if v else 'differ'}" for k, v in repeat.items()) or 'one repetition'
+                d = float(np.max(np.abs(v - other[k]))) if k in other else float('inf')
+                diff[kind] = max(diff.get(kind, 0.0), d)
+        rep = ', '.join(f"{k} {'identical' if v == 0 else f'max |Δ| {v:.2g}'}" for k, v in diff.items()) or 'one repetition'
         lines.append(f'- {m}: n_jobs=1 vs many bit-identical in every run: {"yes" if bit else "NO"}; log posterior ≥ '
                      f"Stan's: min share {lp:.4f}; fallbacks: {', '.join(fb)}; forecasts across repetitions: {rep}.")
     return '\n'.join(lines) + '\n'

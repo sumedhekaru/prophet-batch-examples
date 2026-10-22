@@ -90,12 +90,23 @@ def prophet_batch_label(info: dict[str, Any]) -> str:
     return f'{v} (PyPI)' if src['source'] == 'pypi' else f"{v} (local {src['commit']})"
 
 
+def _linux_cpu() -> str | None:
+    try:
+        for line in Path('/proc/cpuinfo').read_text().splitlines():
+            if line.startswith('model name'):
+                return line.split(':', 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
 def machine_info() -> dict[str, Any]:
     pb = prophet_batch_source()
     return {
         'timestamp': datetime.now().isoformat(timespec='seconds'),
         'platform': platform.platform(),
-        'cpu': _cmd('sysctl', '-n', 'machdep.cpu.brand_string') or platform.processor() or platform.machine(),
+        'cpu': (_cmd('sysctl', '-n', 'machdep.cpu.brand_string') or _linux_cpu() or platform.processor()
+                or platform.machine()),
         'container': Path('/.dockerenv').exists(),
         'logical_cpus': os.cpu_count(),
         'available_cpus': available_cpus(),

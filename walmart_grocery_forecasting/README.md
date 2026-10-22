@@ -17,15 +17,27 @@ time), per environment.
 
 ## Results
 
-Local, Apple M4 (10 cores), 1,437 items, fit + forecast ([full tables](results/local-macos-m4.md)):
+All results on **prophet-batch 0.1.1 from PyPI**, 3 repetitions each, median. Local, Apple M4 (10 cores), 1,437 items,
+fit + forecast ([full tables](results/local-macos-m4.md)):
 
 | model | stock, 10-process pool | prophet-batch | accuracy (Δ MASE, ± 2 SE) |
 |---|---:|---:|---:|
-| default | 55.9 s | 5.5 s (10.2×) | −0.0018 ± 0.0023 |
-| + events | 72.8 s | 7.1 s (10.3×) | −0.0011 ± 0.0021 |
-| + events + SNAP | 80.0 s | 9.3 s (8.6×) | −0.0010 ± 0.0022 |
+| default | 53.1 s | 5.2 s (10.2×) | −0.0018 ± 0.0023 |
+| + events | 69.4 s | 6.7 s (10.4×) | −0.0011 ± 0.0021 |
+| + events + SNAP | 75.5 s | 8.5 s (8.9×) | −0.0010 ± 0.0022 |
 
-prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.6–4.2× faster. In a Linux container (Docker, same Mac): 7.8–8.6× ([docker-linux-arm64.md](results/docker-linux-arm64.md)); prophet-batch's forecasts match across the two platforms to 3·10⁻⁹, stock Prophet's differ by up to 11 units/day. On a Cloud Run job (4 vCPU): 10.6× / 10.3× / 8.8× ([cloudrun-us-east1.md](results/cloudrun-us-east1.md)). On Spark (Dataproc Serverless, 2 executors × 4 cores, 3 repetitions): 9.6× in execution, 2.1× end to end including ≈ 190 s of platform setup, load and warm-up ([dataproc-us-east1.md](results/dataproc-us-east1.md)).
+prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.4–4.2× faster.
+
+| environment | speed-up vs a stock pool on the same cores (default / events / events + SNAP) |
+|---|---|
+| macOS, Apple M4, 10 processes | 10.2× / 10.4× / 8.9× ([page](results/local-macos-m4.md)) |
+| Linux container (Docker, same Mac) | 8.6× / 8.3× / 7.4× ([page](results/docker-linux-arm64.md)) |
+| Cloud Run job, 4 vCPU | 10.9× / 11.1× / 8.9× ([page](results/cloudrun-us-east1.md)) |
+| Spark, Dataproc Serverless, 2 executors × 4 cores (default model) | 9.7× in execution, 1.9× end to end incl. ≈ 185 s of platform setup, load and warm-up ([page](results/dataproc-us-east1.md)) |
+| Windows laptop, i7-1260P, 16 processes (default model) | 11.5× in one run of the 0.1.1 fix before its release (pre-release; a 3-repetition run on 0.1.1 from PyPI is to come) |
+
+Same accuracy everywhere; prophet-batch's forecasts agree across macOS and Linux to 3.5·10⁻⁹, stock Prophet's differ by
+up to 11 units/day. Pre-release results (prophet-batch from a local checkout, before PyPI): [results/history/](results/history/).
 
 ## Run it
 

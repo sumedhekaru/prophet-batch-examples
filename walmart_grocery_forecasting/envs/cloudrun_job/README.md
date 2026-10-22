@@ -24,7 +24,7 @@ under emulation, so it checks behaviour, not speed.
 5–6), which `os.cpu_count()` does not see. The pipeline's default worker count and prophet-batch's `n_jobs=-1` both
 read the quota, so a 4-vCPU job runs 4 workers on both sides.
 
-Status: run on GCP on 2026-10-21 (4 vCPU / 8 GiB, us-east1): [results](../../results/cloudrun-us-east1.md); the
+Status: run on GCP on 2026-10-22 (4 vCPU / 8 GiB, us-east1, 3 repetitions, prophet-batch 0.1.1 from PyPI): [results](../../results/cloudrun-us-east1.md); the
 resources were deleted afterwards with `teardown.sh`.
 
 **Benchmark mode.** `REPS=3` runs every model variant 3 times into `results/runs/<env>-bench-<stamp>/` and writes

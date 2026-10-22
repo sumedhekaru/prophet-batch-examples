@@ -1,30 +1,24 @@
 # Local run: macOS, Apple M4 (10 cores)
 
-2026-10-21 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 (PyPI) · prophet-batch 0.1.0.dev0 (`3150f51`) ·
-pandas 3.0.6 · numpy 2.5.4 · 1,437 M5 FOODS items, train 1,913 days, 28 days held out · 10 worker processes.
-Reproduce: `sh walmart_grocery_forecasting/envs/local/run.sh`.
+2026-10-22 · macOS 26.5.2 arm64 · Python 3.12.13 · prophet 1.5.0 and **prophet-batch 0.1.1, both from PyPI** · pandas
+3.0.6 · numpy 2.5.4 · examples `05e472d` · 1,437 M5 FOODS items, train 1,913 days, 28 days held out · 10 worker
+processes · **3 repetitions** of every model variant: median (min–max). Reproduce:
+`REPS=3 sh walmart_grocery_forecasting/envs/local/run.sh`. Every table: [local-bench-20261022-001238.md](local-bench-20261022-001238.md).
 
 Every method fits the model and forecasts the history plus the 28 days, as `model.predict(model.make_future_dataframe(28))`
 does. prophet-batch: `fit_many` + `predict_many`, with history intervals sampled like stock (`history_uncertainty=True`)
 or in exact closed form (`'analytic'`), keeping only the interval columns (`predict_many(columns=...)`), as the stock
-workers return only those. Linux container: [docker-linux-arm64.md](docker-linux-arm64.md).
+workers return only those. Linux container on the same Mac: [docker-linux-arm64.md](docker-linux-arm64.md).
 
-## Speed: seconds for all 1,437 items (fit + forecast)
+## Speed: seconds for all 1,437 items (fit + forecast), median of 3
 
 | model | stock, serial¹ | stock, 10-process pool | prophet-batch, sampled history intervals | prophet-batch, analytic history intervals |
 |---|---:|---:|---:|---:|
-| default `Prophet()` | 313.8 | 55.9 | 15.7 (3.6×) | **5.5 (10.2×)** |
-| + M5 events as holidays | 390.7 | 72.8 | 17.4 (4.2×) | **7.1 (10.3×)** |
-| + events + SNAP regressors | 407.7 | 80.0 | 19.3 (4.2×) | **9.3 (8.6×)** |
+| default `Prophet()` | 303.0 | 53.1 | 15.4 (3.4×) | **5.2 (10.2×, 9.9–10.4)** |
+| + M5 events as holidays | 384.7 | 69.4 | 16.6 (4.2×) | **6.7 (10.4×, 10.4–10.6)** |
+| + events + SNAP regressors | 401.5 | 75.5 | 18.4 (4.1×) | **8.5 (8.9×, 8.5–8.9)** |
 
-Speed-ups are against the stock 10-process pool. ¹ Timed on 30 items, extrapolated.
-
-History of this table (dogfooding found both): the first run (prophet-batch `a891bd0`) gave 6.5 / 11.3 / 15.1 s
-(9.1× / 6.1× / 5.1×). `c8d9234` lets identical `make_model` configs share preprocessing (the SNAP variant's fit 5.6
-→ 4.0 s); `f85cc3d` builds the forecast feature matrices once per configuration instead of twice per series
-(forecast at 10 workers: 4.2 → 3.0 s default, 8.3 → 4.8 s with holidays), giving 10.1× / 8.8× / 7.6×; `3150f51`
-adds `predict_many(columns=)`, so workers stop sending 112-column frames back (holidays: 4.8 → 3.9 s). Accuracy is
-unchanged to the last digit throughout.
+Speed-ups are against the stock 10-process pool of the same run. ¹ Timed on 30 items, extrapolated.
 
 ## Accuracy on the 28 held-out days
 
@@ -38,9 +32,12 @@ Same accuracy (every Δ MASE within noise). Coverage: analytic mode; prophet-bat
 (its fits reach the exact optimum, where Stan's L-BFGS stops early). Adding events alone does not help these items;
 events + SNAP gives the lowest WAPE, for both.
 
-## Checks (all variants)
+## Checks (every run)
 
 - prophet-batch forecasts are bit-identical with `n_jobs=1` and `n_jobs=10`.
-- Every fit's log posterior is at least Stan's (1,437 / 1,437; median gain ≈ 3).
+- Every fit's log posterior is at least Stan's (1,437 / 1,437).
 - No series fell back to Stan.
-- Setting BLAS threads to 1 (`OMP_NUM_THREADS` etc.) made no difference to prophet-batch (default, at `a891bd0`: 6.6 s vs 6.5 s).
+- Forecasts are identical across the 3 repetitions, for stock and prophet-batch.
+
+History: the pre-release run (prophet-batch 0.1.0.dev0 from a local checkout) gave 10.2× / 10.3× / 8.6× and the
+same accuracy: [history/local-macos-m4.md](history/local-macos-m4.md), with how dogfooding got it there.

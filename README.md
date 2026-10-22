@@ -14,7 +14,7 @@ Status: in development. The first use case runs locally, in a local Linux contai
 
 | Folder | Data | Question |
 |---|---|---|
-| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 8.6–10× faster than a 10-process stock pool (local, M4) |
+| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 7.4–11× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run, Spark, Windows) |
 
 ## Layout
 
@@ -28,7 +28,8 @@ walmart_grocery_forecasting/
     docker/                        # local Linux image
     cloudrun_job/                  # Cloud Run job image (simulated locally with Docker first)
     dataproc/                      # image based on the official Dataproc image (simulated locally first)
-  results/                         # result summaries (markdown); raw JSON stays local
+  results/                         # result summaries (markdown), on released prophet-batch; raw JSON stays local
+    history/                       # pre-release results (prophet-batch from a local checkout)
 ```
 
 ## Setup
@@ -50,4 +51,6 @@ Each run record says which was used: `prophet-batch 0.1.1 (PyPI)` or `prophet-ba
 
 - Data is downloaded by a script and verified by checksum; it is never committed.
 - Every result records the machine, environment and package versions, and can be rerun with one command.
+- Published results use released prophet-batch from PyPI (the run records say "prophet-batch 0.1.1 (PyPI)");
+  results from unreleased code are not published here.
 - Stock Prophet and prophet-batch get identical inputs and model settings.
