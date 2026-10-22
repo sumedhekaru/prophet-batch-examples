@@ -3,6 +3,7 @@
 #   PROJECT  GCP project id      REGION  e.g. us-east1      BUCKET  bucket name (created if missing)
 #   MODELS   variants to run, in order (default: "default events events_snap")
 #   CPU / MEMORY  job size (default 4 vCPU / 8Gi: enough for 1,437 items; the pool uses one worker per vCPU)
+#   JOB_ARGS extra arguments for pipeline.run, comma-separated as gcloud wants them (e.g. "--n,300")
 #   REPS     benchmark: REPS repetitions (each execution on a fresh instance) into results/runs/cloudrun-bench-<stamp>/
 #            + summary.md (examples_core/bench_summary.py)
 #   PROJECT=my-project REGION=us-east1 BUCKET=my-bucket sh walmart_grocery_forecasting/envs/cloudrun_job/deploy.sh
@@ -42,7 +43,7 @@ rep=1
 while [ "$rep" -le "${REPS:-1}" ]; do
   for model in $MODELS; do
     echo "== $model (repetition $rep)"
-    gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --args=--model,"$model$ARGS" --wait \
+    gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --args=--model,"$model$ARGS${JOB_ARGS:+,$JOB_ARGS}" --wait \
       || echo "execution FAILED: $model (repetition $rep)"
   done
   rep=$((rep + 1))

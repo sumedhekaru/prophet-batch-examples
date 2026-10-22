@@ -34,7 +34,7 @@ prophet-batch with `history_uncertainty='analytic'`; with history intervals samp
 | Linux container (Docker, same Mac) | 8.6× / 8.3× / 7.4× ([page](results/docker-linux-arm64.md)) |
 | Cloud Run job, 4 vCPU | 10.9× / 11.1× / 8.9× ([page](results/cloudrun-us-east1.md)) |
 | Spark, Dataproc Serverless, 2 executors × 4 cores (default model) | 9.7× in execution, 1.9× end to end incl. ≈ 185 s of platform setup, load and warm-up ([page](results/dataproc-us-east1.md)) |
-| Windows laptop, i7-1260P, 16 processes (default model) | 11.5× in one run of the 0.1.1 fix before its release (pre-release; a 3-repetition run on 0.1.1 from PyPI is to come) |
+| Windows laptop, i7-1260P, 16 processes | 11.6× / 11.2× / 9.1× ([page](results/windows-i7-1260p.md)) |
 
 Same accuracy everywhere; prophet-batch's forecasts agree across macOS and Linux to 3.5·10⁻⁹, stock Prophet's differ by
 up to 11 units/day. Pre-release results (prophet-batch from a local checkout, before PyPI): [results/history/](results/history/).

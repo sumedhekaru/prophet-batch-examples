@@ -66,8 +66,11 @@ def prophet_batch_source() -> dict[str, str | None]:
         return {'source': 'pypi', 'commit': None}
     url = json.loads(raw).get('url', '')
     commit = os.environ.get('PROPHET_BATCH_COMMIT')
-    if not commit and url.startswith('file://'):
-        commit = _git_commit(Path(url.removeprefix('file://')))
+    if not commit and url.startswith('file:'):
+        # file:///C:/... on Windows: url2pathname turns the URL path into C:\...
+        from urllib.parse import unquote, urlparse
+        from urllib.request import url2pathname
+        commit = _git_commit(Path(url2pathname(unquote(urlparse(url).path))))
     return {'source': 'local', 'commit': commit}
 
 
