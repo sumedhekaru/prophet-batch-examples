@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import queue
 import sys
 import threading
@@ -34,70 +33,11 @@ from typing import Any
 
 import pandas as pd
 
-from examples_core.records import available_cpus, machine_info, prophet_batch_label, utf8_stdout
+from examples_core.records import (MemoryRecorder, available_cpus, footprint_gb, machine_info, prophet_batch_label,
+                                   utf8_stdout)
 
 COLUMNS = ['ds', 'yhat', 'yhat_lower', 'yhat_upper']
 _DONE = object()
-
-
-def _windows_working_set_gb() -> float:
-    """This process's working set (GetProcessMemoryInfo), in GB."""
-    import ctypes
-    from ctypes import wintypes
-
-    class Counters(ctypes.Structure):
-        _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
-                    ('PeakWorkingSetSize', ctypes.c_size_t), ('WorkingSetSize', ctypes.c_size_t),
-                    ('QuotaPeakPagedPoolUsage', ctypes.c_size_t), ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                    ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t), ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                    ('PagefileUsage', ctypes.c_size_t), ('PeakPagefileUsage', ctypes.c_size_t)]
-
-    counters = Counters()
-    counters.cb = ctypes.sizeof(Counters)
-    kernel32 = getattr(ctypes, 'windll').kernel32
-    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-    get_info = kernel32.K32GetProcessMemoryInfo
-    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
-    get_info.restype = wintypes.BOOL
-    if not get_info(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
-        return float('nan')
-    return counters.WorkingSetSize / 1e9
-
-
-def _footprint_gb() -> float:
-    """This process's memory in GB: physical footprint on macOS (incl. compressed pages), the working set on
-    Windows, RSS elsewhere."""
-    if sys.platform == 'win32':
-        try:
-            return _windows_working_set_gb()
-        except Exception:
-            return float('nan')
-    if sys.platform == 'darwin':
-        import ctypes
-        buf = (ctypes.c_uint64 * 48)()
-        if ctypes.CDLL('/usr/lib/libproc.dylib').proc_pid_rusage(os.getpid(), 4, ctypes.byref(buf)) == 0:
-            return buf[2 + 7] / 1e9
-    try:
-        with open('/proc/self/status') as f:
-            for line in f:
-                if line.startswith('VmRSS:'):
-                    return int(line.split()[1]) * 1024 / 1e9
-    except OSError:
-        pass
-    return float('nan')
-
-
-class MemorySampler(threading.Thread):
-    """Samples this process's memory every 0.2 s: (seconds since start, GB)."""
-
-    def __init__(self) -> None:
-        super().__init__(daemon=True)
-        self.t0, self.samples, self.stop = time.perf_counter(), [], threading.Event()
-
-    def run(self) -> None:
-        while not self.stop.is_set():
-            self.samples.append((time.perf_counter() - self.t0, _footprint_gb()))
-            self.stop.wait(0.2)
 
 
 def reader(path: Path, chunk_rows: int, out: queue.Queue, log: list) -> None:
@@ -136,8 +76,8 @@ def main() -> int:
     out_dir = a.out or a.csv.with_name(a.csv.stem + '-out')
     out_dir.mkdir(parents=True, exist_ok=True)
     chunk_rows = meta['rows_per_series'] * a.series_per_batch
-    sampler = MemorySampler()
-    sampler.start()
+    memory = MemoryRecorder()
+    memory.step('stream')
     to_compute: queue.Queue = queue.Queue(maxsize=2)
     to_write: queue.Queue = queue.Queue(maxsize=2)
     log: list[tuple[str, int, float]] = []
@@ -160,28 +100,21 @@ def main() -> int:
             log.append(('forecast', i, time.perf_counter() - t))
             to_write.put((i, fc))
             print(f'batch {i:5d}: {batch["unique_id"].nunique():,} series forecast in {log[-1][2]:.1f} s; '
-                  f'memory {_footprint_gb():.2f} GB', flush=True)
+                  f'memory {footprint_gb():.2f} GB', flush=True)
         to_write.put(_DONE)
     for th in threads:
         th.join()
     total = time.perf_counter() - t_start
-    sampler.stop.set()
-    sampler.join()
-
+    memory_record = memory.stop()
     info = machine_info()
     stage = {k: sum(s for kind, _, s in log if kind == k) for k in ('read', 'forecast', 'write')}
-    peak = max(gb for _, gb in sampler.samples)
-    worker_peak = None  # the pool's workers have exited: their peaks are in RUSAGE_CHILDREN (POSIX only)
-    try:
-        import resource
-        child = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-        worker_peak = (child if sys.platform == 'darwin' else child * 1024) / 1e9
-    except ImportError:  # Windows: not measured
-        pass
+    stream = memory_record['steps']['stream']
+    peak, worker_peak, workers_total = stream['parent_peak_gb'], stream['worker_peak_gb'], stream['workers_total_peak_gb']
     record: dict[str, Any] = {
         'machine': info, 'input': str(a.csv), 'input_mb': a.csv.stat().st_size / 1e6, 'meta': meta,
         'series': series, 'skipped_batches': skipped, 'series_per_batch': a.series_per_batch, 'workers': a.workers,
-        'seconds': total, 'stage_seconds': stage, 'peak_gb': peak, 'worker_peak_gb': worker_peak, 'memory': sampler.samples, 'log': log}
+        'seconds': total, 'stage_seconds': stage, 'peak_gb': peak, 'worker_peak_gb': worker_peak,
+        'workers_total_peak_gb': workers_total, 'memory': memory_record, 'log': log}
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     runs = Path(__file__).resolve().parent / 'results' / 'runs'
     runs.mkdir(parents=True, exist_ok=True)
@@ -189,7 +122,7 @@ def main() -> int:
     print(f'\n{series:,} series from {a.csv.name} ({record["input_mb"]:,.0f} MB) in {total:.1f} s '
           f'({series / total:,.0f} series/s); stages (summed, they overlap): read {stage["read"]:.1f} s, '
           f'forecast {stage["forecast"]:.1f} s, write {stage["write"]:.1f} s; peak memory {peak:.2f} GB '
-          f'({"each worker ≤ " + format(worker_peak, ".2f") + " GB" if worker_peak is not None else "workers not measured"}); '
+          f'({"largest worker " + format(worker_peak, ".2f") + " GB, all workers " + format(workers_total, ".2f") + " GB" if worker_peak is not None else "workers not measured"}); '
           f'prophet-batch {prophet_batch_label(info)}; {skipped} batch(es) already done')
     return 0
 

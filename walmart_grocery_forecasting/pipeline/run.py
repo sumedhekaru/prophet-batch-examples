@@ -19,9 +19,9 @@ from typing import Any
 
 import numpy as np
 
-from examples_core.forecast import Result, run_batch, run_stock_pool, run_stock_serial
-from examples_core.records import (aligned, available_cpus, evaluate, machine_info, paired, prophet_batch_label,
-                                   utf8_stdout)
+from examples_core.forecast import Result, run_batch, run_forecast_many, run_stock_pool, run_stock_serial
+from examples_core.records import (MemoryRecorder, aligned, available_cpus, evaluate, machine_info, paired,
+                                   prophet_batch_label, utf8_stdout)
 
 from . import data
 from .models import VARIANTS, ModelSpec
@@ -88,14 +88,22 @@ def main() -> int:
     steps = [('stock_serial', lambda: [run_stock_serial({s: series[s] for s in serial_ids}, h, spec)]),
              ('stock_pool', lambda: [run_stock_pool(series, h, spec, a.workers)]),
              ('batch n_jobs=1', lambda: run_batch(long_df, h, spec, 1)),
-             (f'batch n_jobs={a.workers}', lambda: run_batch(long_df, h, spec, a.workers))]
+             (f'batch n_jobs={a.workers}', lambda: run_batch(long_df, h, spec, a.workers)),
+             (f'forecast_many n_jobs={a.workers}', lambda: run_forecast_many(long_df, h, spec, a.workers))]
+    memory = MemoryRecorder()
     for label, step in steps:
         print(f'{label} ...', flush=True)
+        memory.step(label)
         for r in step():
             results.append(r)
             print(f'  {r.method:15s} workers {r.workers:2d}: fit {r.fit_s:7.1f} s  forecast {r.predict_s:7.1f} s'
                   f'  ({r.timed_n} series)', flush=True)
 
+    memory_record = memory.stop()
+    for label, m in memory_record['steps'].items():
+        workers = (f", largest worker {m['worker_peak_gb']:.2f} GB, all workers {m['workers_total_peak_gb']:.2f} GB"
+                   if m['worker_peak_gb'] is not None else '')
+        print(f"  memory {label}: peak {m['parent_peak_gb']:.2f} GB here{workers}", flush=True)
     stock = next(r for r in results if r.method == 'stock_pool')
     stock_acc = evaluate(stock, train, test, SEASON)
     rows, per_series = [], {}
@@ -117,6 +125,12 @@ def main() -> int:
         one, many = batch[(mode, 1)], batch[(mode, a.workers)]
         same = all(np.array_equal(aligned(one, ids, k), aligned(many, ids, k)) for k in ('yhat', 'lower', 'upper'))
         checks[f'{mode}: n_jobs=1 and n_jobs={a.workers} forecasts bit-identical'] = same
+    for mode in ('sampled', 'analytic'):
+        one_step = next(r for r in results if r.method == f'forecast_many_{mode}')
+        two_step = batch[(f'batch_{mode}', a.workers)]
+        same = all(np.array_equal(aligned(one_step, ids, k), aligned(two_step, ids, k))
+                   for k in ('yhat', 'lower', 'upper', 'lp'))
+        checks[f'forecast_many_{mode} and batch_{mode} (n_jobs={a.workers}) bit-identical'] = same
     gain = aligned(batch[('batch_sampled', a.workers)], ids, 'lp') - aligned(stock, ids, 'lp')
     checks['log posterior ≥ Stan\'s (share of series, tol 1e-6)'] = f'{np.mean(gain >= -1e-6):.4f}'
     checks['log posterior gain over Stan (min / median)'] = f'{gain.min():.3g} / {np.median(gain):.3g}'
@@ -128,7 +142,7 @@ def main() -> int:
     stem = a.out / f"{a.env}-{a.model}-{n}-{datetime.now():%Y%m%d-%H%M%S}"
     stem.with_suffix('.json').write_text(json.dumps(
         {'machine': info, 'args': {k: str(v) for k, v in vars(a).items()}, 'n': n, 'horizon': h, 'ids': ids,
-         'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str), encoding='utf-8')
+         'rows': rows, 'checks': checks, 'per_series': per_series, 'memory': memory_record}, indent=1, default=str), encoding='utf-8')
     np.savez_compressed(stem.with_suffix('.npz'), ids=np.array(ids), test_ds=test.columns.to_numpy(),
                         **{f'{r.method}_{r.workers}_{k}': aligned(r, ids, k) for r in results if r.timed_n == n
                            for k in ('yhat', 'lower', 'upper', 'lp')})

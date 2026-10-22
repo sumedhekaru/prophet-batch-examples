@@ -170,3 +170,44 @@ def run_batch(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int
         results.append(Result(name, workers, [str(s) for s in ids], bands[:, 0], bands[:, 1], bands[:, 2], lp,
                               fit_s, predict_s, len(ids), extra))
     return results
+
+
+def _futures(long_df: pd.DataFrame, horizon: int, spec: ModelSpec) -> pd.DataFrame:
+    """Every series' future frame (its distinct history dates + the next `horizon` steps, as make_future_dataframe
+    builds it), with the regressor values joined: a long frame with the id column, for forecast_many."""
+    frames = []
+    for sid, g in long_df.groupby('unique_id', sort=False):
+        hist = pd.Series(pd.to_datetime(g['ds'].unique())).sort_values()
+        last = hist.iloc[-1]
+        new = pd.date_range(start=last, periods=horizon + 1, freq=spec.freq)
+        new = new[new > last][:horizon]
+        ds = np.concatenate([hist.to_numpy(), new.to_numpy()])
+        frames.append(spec.with_regressors(pd.DataFrame({'ds': ds})).assign(unique_id=sid))
+    return pd.concat(frames, ignore_index=True)
+
+
+def run_forecast_many(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int,
+                      seed: int = 0) -> list[Result]:
+    """prophet-batch 0.1.2's one-step path: forecast_many (fit + forecast in each worker, no models sent between
+    processes), once per history-interval mode, each a full call. Same output columns as run_batch keeps, so its
+    forecasts must equal run_batch's bit for bit. Timed as one step: fit_s holds the whole call, predict_s is 0.
+    """
+    from prophet_batch import forecast_many
+
+    kwargs: dict[str, Any] = {'make_model': spec} if spec.regressors else spec.kwargs()
+    where = ({'futures': _futures(long_df, horizon, spec)} if spec.regressors else {'periods': horizon})
+    results = []
+    for mode in (True, 'analytic'):
+        t0 = time.perf_counter()
+        fc, params = forecast_many(long_df, freq=spec.freq, seed=seed, n_jobs=workers, history_uncertainty=mode,
+                                   columns=BANDS, return_params=True, **where, **kwargs)
+        seconds = time.perf_counter() - t0
+        ids = list(params)
+        tail = fc.groupby('unique_id', sort=False).tail(horizon)
+        bands = {sid: g[BANDS].to_numpy().T for sid, g in tail.groupby('unique_id', sort=False)}
+        stacked = np.array([bands[sid] for sid in ids])
+        lp = np.array([float(params[sid]['lp__'][0, 0]) for sid in ids])
+        name = 'forecast_many_sampled' if mode is True else 'forecast_many_analytic'
+        results.append(Result(name, workers, [str(s) for s in ids], stacked[:, 0], stacked[:, 1], stacked[:, 2], lp,
+                              seconds, 0.0, len(ids), {'one_step': True}))
+    return results

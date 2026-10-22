@@ -25,7 +25,9 @@ MODEL_LABEL = {'default': 'default `Prophet()`', 'events': '+ M5 events as holid
                'events_snap': '+ events + SNAP regressors'}
 METHOD_LABEL = {'stock_serial': 'stock, serial¹', 'stock_pool': 'stock, process pool',
                 'batch_sampled': 'prophet-batch, sampled history intervals',
-                'batch_analytic': 'prophet-batch, analytic history intervals'}
+                'batch_analytic': 'prophet-batch, analytic history intervals',
+                'forecast_many_sampled': 'forecast_many (one step), sampled history intervals²',
+                'forecast_many_analytic': 'forecast_many (one step), analytic history intervals²'}
 
 
 def _stat(xs: list[float], fmt: str = '{:,.1f}') -> str:
@@ -92,6 +94,8 @@ def summary(d: Path) -> str:
                          f"{_stat([x['predict_s'] for x in same])} | {_stat([x['total_s'] for x in same])} | "
                          f"{_stat(speed, '{:.1f}')}× |")
         lines.append('')
+    if any(row['method'].startswith('forecast_many') for m in models for row in runs[m][0]['rows']):
+        lines += ['² fit_many + predict_many in one call: the whole time is shown as fit, forecast as 0.', '']
     lines += ['¹ Timed on a sample (30 items), extrapolated. With different worker counts by repetition, the workers '
               'column shows the first repetition\'s.', '']
 
@@ -109,6 +113,21 @@ def summary(d: Path) -> str:
                          f"{a['smape']:.2f} | {a['mase']:.4f} | {delta} | {a['coverage']:.3f} |")
     lines.append('')
 
+    with_memory = [m for m in models if any('memory' in r for r in runs[m])]
+    if with_memory:
+        how = runs[with_memory[0]][0]['memory']
+        lines += [f"## Memory per step (main process: {how['how']}; workers: {how.get('workers_how', 'n/a')})", '',
+                  '| group | step | main process peak GB | largest worker GB | all workers GB |', '|---|---|---:|---:|---:|']
+        for m in with_memory:
+            for label in runs[m][0]['memory']['steps']:
+                got = [r['memory']['steps'][label] for r in runs[m] if 'memory' in r and label in r['memory']['steps']]
+
+                def col(key: str) -> str:
+                    vals = [g.get(key) for g in got if g.get(key) is not None]
+                    return _stat(vals, '{:.2f}') if vals else '–'
+                lines.append(f"| {m} | {label} | {col('parent_peak_gb')} | {col('worker_peak_gb')} | "
+                             f"{col('workers_total_peak_gb')} |")
+        lines += ['', 'Median (min–max) over repetitions.', '']
     lines += ['## Checks', '']
     for m in models:
         rs = runs[m]
