@@ -1133,7 +1133,7 @@ wheels = [
 
 [[package]]
 name = "prophet-batch"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "../prophet-batch" }
 dependencies = [
     { name = "numpy" },
