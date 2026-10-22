@@ -16,12 +16,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from examples_core.records import available_cpus
+from examples_core.records import available_cpus, utf8_stdout
 
 from .run import COLUMNS
 
 
 def main() -> int:
+    utf8_stdout()  # the result line has a "→"; a Windows console's code page can't print it
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('csv', type=Path)
     p.add_argument('--out', type=Path, default=None)

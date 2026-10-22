@@ -40,8 +40,38 @@ COLUMNS = ['ds', 'yhat', 'yhat_lower', 'yhat_upper']
 _DONE = object()
 
 
+def _windows_working_set_gb() -> float:
+    """This process's working set (GetProcessMemoryInfo), in GB."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
+                    ('PeakWorkingSetSize', ctypes.c_size_t), ('WorkingSetSize', ctypes.c_size_t),
+                    ('QuotaPeakPagedPoolUsage', ctypes.c_size_t), ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                    ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t), ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                    ('PagefileUsage', ctypes.c_size_t), ('PeakPagefileUsage', ctypes.c_size_t)]
+
+    counters = Counters()
+    counters.cb = ctypes.sizeof(Counters)
+    kernel32 = getattr(ctypes, 'windll').kernel32
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    get_info = kernel32.K32GetProcessMemoryInfo
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    get_info.restype = wintypes.BOOL
+    if not get_info(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        return float('nan')
+    return counters.WorkingSetSize / 1e9
+
+
 def _footprint_gb() -> float:
-    """This process's memory in GB: physical footprint on macOS (incl. compressed pages), RSS elsewhere."""
+    """This process's memory in GB: physical footprint on macOS (incl. compressed pages), the working set on
+    Windows, RSS elsewhere."""
+    if sys.platform == 'win32':
+        try:
+            return _windows_working_set_gb()
+        except Exception:
+            return float('nan')
     if sys.platform == 'darwin':
         import ctypes
         buf = (ctypes.c_uint64 * 48)()
@@ -141,9 +171,13 @@ def main() -> int:
     info = machine_info()
     stage = {k: sum(s for kind, _, s in log if kind == k) for k in ('read', 'forecast', 'write')}
     peak = max(gb for _, gb in sampler.samples)
-    import resource  # the pool's workers have exited: their peaks are in RUSAGE_CHILDREN
-    child = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    worker_peak = (child if sys.platform == 'darwin' else child * 1024) / 1e9
+    worker_peak = None  # the pool's workers have exited: their peaks are in RUSAGE_CHILDREN (POSIX only)
+    try:
+        import resource
+        child = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+        worker_peak = (child if sys.platform == 'darwin' else child * 1024) / 1e9
+    except ImportError:  # Windows: not measured
+        pass
     record: dict[str, Any] = {
         'machine': info, 'input': str(a.csv), 'input_mb': a.csv.stat().st_size / 1e6, 'meta': meta,
         'series': series, 'skipped_batches': skipped, 'series_per_batch': a.series_per_batch, 'workers': a.workers,
@@ -154,7 +188,8 @@ def main() -> int:
     (runs / f'{a.csv.stem}-{stamp}.json').write_text(json.dumps(record, default=str), encoding='utf-8')
     print(f'\n{series:,} series from {a.csv.name} ({record["input_mb"]:,.0f} MB) in {total:.1f} s '
           f'({series / total:,.0f} series/s); stages (summed, they overlap): read {stage["read"]:.1f} s, '
-          f'forecast {stage["forecast"]:.1f} s, write {stage["write"]:.1f} s; peak memory {peak:.2f} GB (each worker ≤ {worker_peak:.2f} GB); '
+          f'forecast {stage["forecast"]:.1f} s, write {stage["write"]:.1f} s; peak memory {peak:.2f} GB '
+          f'({"each worker ≤ " + format(worker_peak, ".2f") + " GB" if worker_peak is not None else "workers not measured"}); '
           f'prophet-batch {prophet_batch_label(info)}; {skipped} batch(es) already done')
     return 0
 
