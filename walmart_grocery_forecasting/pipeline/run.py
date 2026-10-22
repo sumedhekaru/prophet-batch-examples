@@ -12,141 +12,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import platform
-import subprocess
 import sys
 from datetime import datetime
-from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
+
+from examples_core.forecast import Result, run_batch, run_stock_pool, run_stock_serial
+from examples_core.records import (aligned, available_cpus, evaluate, machine_info, paired, prophet_batch_label,
+                                   utf8_stdout)
 
 from . import data
-from .forecast import Result, run_batch, run_stock_pool, run_stock_serial
 from .models import VARIANTS, ModelSpec
-from .metrics import coverage, mase, smape, wape_parts
 
 HERE = Path(__file__).resolve().parents[1]
 RUNS = HERE / 'results' / 'runs'
 SEASON = 7  # MASE seasonal period for daily retail data
-
-
-def _cmd(*args: str) -> str | None:
-    try:
-        return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
-    except Exception:
-        return None
-
-
-def available_cpus(cgroup: Path = Path('/sys/fs/cgroup')) -> int:
-    """CPUs this process may use: the affinity set, capped by a container's CPU quota (cgroup v2 cpu.max, or v1 CFS
-    as on Cloud Run), which os.cpu_count() ignores. Same rule as prophet-batch's n_jobs=-1, so both sides get the same
-    worker count.
-    """
-    n = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
-    for quota_file, period_file in ((cgroup / 'cpu.max', None),
-                                    (cgroup / 'cpu' / 'cpu.cfs_quota_us', cgroup / 'cpu' / 'cpu.cfs_period_us')):
-        try:
-            text = quota_file.read_text().split()
-            quota, period = (text[0], text[1]) if period_file is None else (text[0], period_file.read_text().strip())
-            q, p = int(quota), int(period)
-        except (OSError, ValueError, IndexError):  # missing, or 'max' (no quota)
-            continue
-        if q > 0 and p > 0:  # v1 uses -1 for no quota
-            return max(1, min(n, -(-q // p)))
-    return n
-
-
-def _git_commit(path: Path) -> str | None:
-    rev = _cmd('git', '-C', str(path), 'rev-parse', '--short', 'HEAD')
-    dirty = _cmd('git', '-C', str(path), 'status', '--porcelain', '--untracked-files=no')
-    return f'{rev}{"+dirty" if dirty else ""}' if rev else None
-
-
-def prophet_batch_source() -> dict[str, str | None]:
-    """Where prophet-batch came from: the package index (PyPI) or a local checkout (and its commit).
-
-    Index installs carry no direct_url.json (PEP 610); local ones (editable checkout or a wheel built from one) do. In
-    images built from a local checkout, PROPHET_BATCH_COMMIT names the commit the wheel was built from.
-    """
-    raw = distribution('prophet-batch').read_text('direct_url.json')
-    if not raw:
-        return {'source': 'pypi', 'commit': None}
-    url = json.loads(raw).get('url', '')
-    commit = os.environ.get('PROPHET_BATCH_COMMIT')
-    if not commit and url.startswith('file://'):
-        commit = _git_commit(Path(url.removeprefix('file://')))
-    return {'source': 'local', 'commit': commit}
-
-
-def prophet_batch_label(info: dict[str, Any]) -> str:
-    """'0.1.1 (PyPI)' or '0.1.1 (local abc1234)'; older records have only a commit."""
-    v, src = info['versions']['prophet-batch'], info.get('prophet_batch')
-    if src is None:
-        return f"{v} ({info['commits']['prophet-batch']})"
-    return f'{v} (PyPI)' if src['source'] == 'pypi' else f"{v} (local {src['commit']})"
-
-
-def _linux_cpu() -> str | None:
-    try:
-        for line in Path('/proc/cpuinfo').read_text().splitlines():
-            if line.startswith('model name'):
-                return line.split(':', 1)[1].strip()
-    except OSError:
-        pass
-    return None
-
-
-def machine_info() -> dict[str, Any]:
-    pb = prophet_batch_source()
-    return {
-        'timestamp': datetime.now().isoformat(timespec='seconds'),
-        'platform': platform.platform(),
-        'cpu': (_cmd('sysctl', '-n', 'machdep.cpu.brand_string') or _linux_cpu() or platform.processor()
-                or platform.machine()),
-        'container': Path('/.dockerenv').exists(),
-        'logical_cpus': os.cpu_count(),
-        'available_cpus': available_cpus(),
-        'python': sys.version.split()[0],
-        'versions': {p: version(p) for p in ('prophet', 'prophet-batch', 'cmdstanpy', 'numpy', 'pandas')},
-        'prophet_batch': pb,
-        'commits': {'prophet-batch-examples': os.environ.get('EXAMPLES_COMMIT') or _git_commit(HERE.parent),
-                    'prophet-batch': pb['commit']},
-        'thread_env': {v: os.environ.get(v) for v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
-                                                      'VECLIB_MAXIMUM_THREADS')},
-    }
-
-
-def evaluate(r: Result, train: pd.DataFrame, test: pd.DataFrame) -> dict[str, Any]:
-    """Per-series metrics (in train's item order) and their summary."""
-    pos = {sid: i for i, sid in enumerate(r.ids)}
-    err = scale = 0.0
-    sm, ms, cov = [], [], []
-    for sid in train.index:
-        i, y = pos[sid], test.loc[sid].to_numpy()
-        e, s = wape_parts(y, r.yhat[i])
-        err, scale = err + e, scale + s
-        sm.append(smape(y, r.yhat[i]))
-        ms.append(mase(y, r.yhat[i], train.loc[sid].to_numpy(), SEASON))
-        cov.append(coverage(y, r.lower[i], r.upper[i]))
-    per = {'smape': np.array(sm), 'mase': np.array(ms), 'coverage': np.array(cov)}
-    summary = {'wape': err / scale, 'smape': float(per['smape'].mean()), 'mase': float(np.nanmean(per['mase'])),
-               'mase_median': float(np.nanmedian(per['mase'])), 'coverage': float(per['coverage'].mean())}
-    return {'summary': summary, 'per_series': per}
-
-
-def paired(a: np.ndarray, b: np.ndarray) -> dict[str, float]:
-    """Mean of b - a over series where both are finite, with its standard error."""
-    d = (b - a)[np.isfinite(b - a)]
-    return {'mean': float(d.mean()), 'se': float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else 0.0}
-
-
-def aligned(r: Result, ids: list[str], attr: str) -> np.ndarray:
-    pos = {sid: i for i, sid in enumerate(r.ids)}
-    return getattr(r, attr)[[pos[s] for s in ids]]
 
 
 def markdown(info: dict[str, Any], n: int, rows: list[dict[str, Any]], checks: dict[str, Any]) -> str:
@@ -175,13 +57,6 @@ def markdown(info: dict[str, Any], n: int, rows: list[dict[str, Any]], checks: d
                      f"{s['mase_median']:.4f} | {s['coverage']:.3f} | {delta} |")
     lines += ['', '## Checks', ''] + [f'- {k}: {v}' for k, v in checks.items()]
     return '\n'.join(lines) + '\n'
-
-
-def utf8_stdout() -> None:
-    """Print the summaries' symbols (Δ × ± ·) on any console: Windows defaults to cp1252 when output is redirected."""
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, 'reconfigure'):
-            stream.reconfigure(encoding='utf-8', errors='replace')
 
 
 def main() -> int:
@@ -222,14 +97,14 @@ def main() -> int:
                   f'  ({r.timed_n} series)', flush=True)
 
     stock = next(r for r in results if r.method == 'stock_pool')
-    stock_acc = evaluate(stock, train, test)
+    stock_acc = evaluate(stock, train, test, SEASON)
     rows, per_series = [], {}
     for r in results:
         row: dict[str, Any] = {'method': r.method, 'workers': r.workers, 'timed_n': r.timed_n,
                                'fit_s': r.fit_s * n / r.timed_n, 'predict_s': r.predict_s * n / r.timed_n,
                                'total_s': r.seconds_for(n)}
         if r.timed_n == n and (r.method == 'stock_pool' or r.workers == a.workers):
-            acc = evaluate(r, train, test)
+            acc = evaluate(r, train, test, SEASON)
             row['accuracy'] = acc['summary']
             per_series[f'{r.method}_{r.workers}'] = {k: v.tolist() for k, v in acc['per_series'].items()}
             if r is not stock:
@@ -256,7 +131,7 @@ def main() -> int:
          'rows': rows, 'checks': checks, 'per_series': per_series}, indent=1, default=str), encoding='utf-8')
     np.savez_compressed(stem.with_suffix('.npz'), ids=np.array(ids), test_ds=test.columns.to_numpy(),
                         **{f'{r.method}_{r.workers}_{k}': aligned(r, ids, k) for r in results if r.timed_n == n
-                           for k in ('yhat', 'lower', 'upper')})
+                           for k in ('yhat', 'lower', 'upper', 'lp')})
     md = markdown(info, n, rows, checks)
     stem.with_suffix('.md').write_text(md, encoding='utf-8')
     print('\n' + md + f'\nsaved {stem}.{{json,npz,md}}')

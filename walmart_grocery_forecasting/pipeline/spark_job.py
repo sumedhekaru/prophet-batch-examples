@@ -27,9 +27,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from examples_core.forecast import Result
+from examples_core.records import evaluate, machine_info
+
 from . import data
-from .forecast import Result
-from .run import evaluate, machine_info
+from .run import SEASON
 
 H = data.HORIZON
 
@@ -264,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f'{a.method}: execute {execute_s:.1f} s', flush=True)
 
     r = _to_result(a.method, out, execute_s, cores)
-    acc = evaluate(r, train, test)
+    acc = evaluate(r, train, test, SEASON)
     run_id = a.run_id or f'{a.method}-{time.strftime("%Y%m%d-%H%M%S")}'
     marks['write_start'] = time.time()
     record = {

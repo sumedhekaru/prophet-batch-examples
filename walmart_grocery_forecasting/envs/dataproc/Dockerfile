@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r /tmp/pkgs/requirements.txt -r /tmp/pkgs/prophe
 
 # The pipeline as an installed package, so Spark's Python workers import it without any PYTHONPATH setup.
 ARG SITE=/usr/local/lib/python3.12/site-packages
+COPY examples_core/ $SITE/examples_core/
 COPY walmart_grocery_forecasting/__init__.py $SITE/walmart_grocery_forecasting/
 COPY walmart_grocery_forecasting/pipeline/ $SITE/walmart_grocery_forecasting/pipeline/
 

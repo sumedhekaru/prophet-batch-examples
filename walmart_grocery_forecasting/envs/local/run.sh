@@ -3,7 +3,7 @@
 #   sh walmart_grocery_forecasting/envs/local/run.sh            # from the repo root
 #   sh walmart_grocery_forecasting/envs/local/run.sh --n 50     # extra arguments go to every run
 #   REPS=3 sh walmart_grocery_forecasting/envs/local/run.sh     # benchmark: 3 repetitions into results/runs/local-bench-<stamp>/
-#                                                               # + summary.md (pipeline/bench_summary.py)
+#                                                               # + summary.md (examples_core/bench_summary.py)
 # prophet-batch is the PyPI release pinned in uv.lock. Development: PROPHET_BATCH_LOCAL=../prophet-batch runs against
 # that checkout instead (uv run --with-editable); each run record states which one was used.
 set -e
@@ -27,6 +27,6 @@ while [ "$rep" -le "${REPS:-1}" ]; do
   rep=$((rep + 1))
 done
 if [ -n "$REPS" ]; then
-  uv run python -m walmart_grocery_forecasting.pipeline.bench_summary "$OUT" > "$OUT/summary.md"
+  uv run python -m examples_core.bench_summary "$OUT" > "$OUT/summary.md"
   echo "summary: $OUT/summary.md"
 fi

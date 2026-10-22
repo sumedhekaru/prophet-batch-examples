@@ -28,7 +28,7 @@ def main() -> int:
 
     from . import data
     from .models import ModelSpec
-    from .run import utf8_stdout
+    from examples_core.records import utf8_stdout
 
     utf8_stdout()
     logging.getLogger('cmdstanpy').disabled = True

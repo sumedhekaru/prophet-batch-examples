@@ -32,5 +32,5 @@ the summary of the reference run is committed under [results/](../../results/). 
 Only macOS has been run so far; the Linux path is exercised by the Docker images (later).
 
 **Benchmark mode.** `REPS=3` runs every model variant 3 times into `results/runs/<env>-bench-<stamp>/` and writes
-`summary.md` there with [pipeline/bench_summary.py](../../pipeline/bench_summary.py): each time as median (min–max),
+`summary.md` there with [examples_core/bench_summary.py](../../../examples_core/bench_summary.py): each time as median (min–max),
 speed-ups computed within each run, accuracy, checks, and whether repetitions gave identical forecasts.

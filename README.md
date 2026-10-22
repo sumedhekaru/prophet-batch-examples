@@ -20,6 +20,8 @@ Status: in development. The first use case runs locally, in a local Linux contai
 
 ```
 README.md                          # this file
+examples_core/                     # shared by every use case: stock and prophet-batch runners, metrics, run records,
+                                   # bench_summary (repetitions → medians)
 walmart_grocery_forecasting/
   README.md                        # the use case: data, model, metrics, results
   pipeline/                        # shared code: load data, fit (stock and prophet-batch), forecast, evaluate

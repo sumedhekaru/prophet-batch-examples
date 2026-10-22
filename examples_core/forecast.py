@@ -1,8 +1,8 @@
-"""Fit + forecast every item with stock Prophet and with prophet-batch, timed.
+"""Fit + forecast every series with stock Prophet and with prophet-batch, timed (shared by every use case).
 
-Every method does what a user does: fit the model variant (models.py) on the training days, then forecast the history
-plus the next `horizon` days (`make_future_dataframe(horizon)`, with the regressor values joined), so the timings
-include history intervals. Accuracy uses the last `horizon` rows.
+Every method does what a user does: fit the model (a use case's ModelSpec) on the training rows, then forecast the
+history plus the next `horizon` steps (`make_future_dataframe(horizon, freq=spec.freq)`, with the regressor values
+joined), so the timings include history intervals. Accuracy uses the last `horizon` rows.
 
   stock_serial  Prophet().fit + predict per series in one process (on a sample: it is slow; extrapolated)
   stock_pool    the same per series in a process pool (spawn, `workers` processes)
@@ -19,12 +19,29 @@ import time
 import zlib
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
+from prophet import Prophet
 
-from .models import ModelSpec
+
+class ModelSpec(Protocol):
+    """What the runners need from a use case's model definition (picklable: it goes to worker processes).
+
+    freq: the series' frequency (pandas alias, e.g. 'D', '7D', 'h', 'MS'); regressors: extra regressor columns (their
+    values come from with_regressors); kwargs(): Prophet() arguments shared by every series; called with a series id,
+    returns a fresh unfitted model for it.
+    """
+
+    freq: str
+    regressors: list[str]
+
+    def __call__(self, series_id: object = None) -> Prophet: ...
+
+    def kwargs(self) -> dict: ...
+
+    def with_regressors(self, df: pd.DataFrame) -> pd.DataFrame: ...
 
 BANDS = ['yhat', 'yhat_lower', 'yhat_upper']
 
@@ -67,7 +84,7 @@ def _stock_one(args: tuple[str, pd.DataFrame, int, ModelSpec]) -> tuple[str, np.
     m = spec(sid).fit(train)
     t1 = time.perf_counter()
     np.random.seed(zlib.crc32(sid.encode()))
-    fc = m.predict(spec.with_regressors(m.make_future_dataframe(horizon))).tail(horizon)
+    fc = m.predict(spec.with_regressors(m.make_future_dataframe(horizon, freq=spec.freq))).tail(horizon)
     t2 = time.perf_counter()
     bands = fc[['yhat', 'yhat_lower', 'yhat_upper']].to_numpy().T
     return sid, bands, float(m.params['lp__'][0, 0]), t1 - t0, t2 - t1
@@ -138,12 +155,13 @@ def run_batch(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int
     for mode in (True, 'analytic'):
         t0 = time.perf_counter()
         if spec.regressors:
-            futures = {sid: spec.with_regressors(m.make_future_dataframe(horizon)) for sid, m in models.items()}
+            futures = {sid: spec.with_regressors(m.make_future_dataframe(horizon, freq=spec.freq))
+                       for sid, m in models.items()}
             fcs = predict_many(models, futures=futures, seed=seed, n_jobs=workers, history_uncertainty=mode,
                                columns=BANDS)
         else:
-            fcs = predict_many(models, periods=horizon, seed=seed, n_jobs=workers, history_uncertainty=mode,
-                               columns=BANDS)
+            fcs = predict_many(models, periods=horizon, freq=spec.freq, seed=seed, n_jobs=workers,
+                               history_uncertainty=mode, columns=BANDS)
         predict_s = time.perf_counter() - t0
         bands = np.array([fcs[sid][BANDS].tail(horizon).to_numpy().T
                           for sid in ids])

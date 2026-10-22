@@ -4,7 +4,7 @@
 #   MODELS   variants to run, in order (default: "default events events_snap")
 #   CPU / MEMORY  job size (default 4 vCPU / 8Gi: enough for 1,437 items; the pool uses one worker per vCPU)
 #   REPS     benchmark: REPS repetitions (each execution on a fresh instance) into results/runs/cloudrun-bench-<stamp>/
-#            + summary.md (pipeline/bench_summary.py)
+#            + summary.md (examples_core/bench_summary.py)
 #   PROJECT=my-project REGION=us-east1 BUCKET=my-bucket sh walmart_grocery_forecasting/envs/cloudrun_job/deploy.sh
 # Results: gs://$BUCKET/results/ (copied to results/runs/ at the end). Remove everything with teardown.sh.
 set -e
@@ -52,7 +52,7 @@ if [ -n "$REPS" ]; then
   OUT=walmart_grocery_forecasting/results/runs/$SUB
   mkdir -p "$OUT"
   gcloud storage cp "gs://$BUCKET/results/$SUB/*" "$OUT/"
-  uv run python -m walmart_grocery_forecasting.pipeline.bench_summary "$OUT" > "$OUT/summary.md"
+  uv run python -m examples_core.bench_summary "$OUT" > "$OUT/summary.md"
   echo "summary: $OUT/summary.md"
 else
   gcloud storage cp "gs://$BUCKET/results/*" walmart_grocery_forecasting/results/runs/

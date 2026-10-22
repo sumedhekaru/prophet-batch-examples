@@ -1,5 +1,7 @@
 # Docker build context is the repo root: send only what the images copy.
 *
+!examples_core/
+examples_core/__pycache__/
 !walmart_grocery_forecasting/__init__.py
 !walmart_grocery_forecasting/pipeline/
 !walmart_grocery_forecasting/envs/docker/

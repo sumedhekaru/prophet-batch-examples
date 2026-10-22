@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .run import prophet_batch_label
+from examples_core.records import prophet_batch_label
 
 PHASES = ['provision', 'driver_start', 'executors', 'load', 'warmup', 'execute', 'post', 'shutdown', 'end_to_end']
 
@@ -135,7 +135,7 @@ def summarize(directory: Path) -> str:
 
 
 if __name__ == '__main__':
-    from .run import utf8_stdout
+    from examples_core.records import utf8_stdout
 
     utf8_stdout()
     print(summarize(Path(sys.argv[1])), end='')

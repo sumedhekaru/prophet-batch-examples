@@ -1,6 +1,6 @@
 """Summarize repeated runs of pipeline.run (local, Docker, Cloud Run): speed as median (min–max), accuracy, checks.
 
-    uv run python -m walmart_grocery_forecasting.pipeline.bench_summary DIR > DIR/summary.md
+    uv run python -m examples_core.bench_summary DIR > DIR/summary.md
 
 DIR holds the <env>-<model>-<n>-<timestamp>.{json,npz} files of REPS repetitions per model variant (the run scripts
 write them there when REPS is set). Speed-ups are computed within each run (against that run's stock pool), then
@@ -16,9 +16,11 @@ from typing import Any
 
 import numpy as np
 
-from .run import prophet_batch_label
+from .records import prophet_batch_label
 
-MODELS = ['default', 'events', 'events_snap']
+# Runs are grouped by dataset (public_datasets) or model variant (walmart); known groups in this order, then the rest.
+ORDER = ['default', 'events', 'events_snap', 'm5_item_store', 'm4_daily', 'm5_item', 'm4_weekly', 'm4_hourly',
+         'tourism_monthly']
 MODEL_LABEL = {'default': 'default `Prophet()`', 'events': '+ M5 events as holidays',
                'events_snap': '+ events + SNAP regressors'}
 METHOD_LABEL = {'stock_serial': 'stock, serial¹', 'stock_pool': 'stock, process pool',
@@ -44,23 +46,29 @@ def _forecasts(path: Path) -> dict[str, np.ndarray]:
         return out
 
 
+def group(r: dict[str, Any]) -> str:
+    return r['machine'].get('dataset') or r['machine']['model']
+
+
 def load(d: Path) -> dict[str, list[dict[str, Any]]]:
     runs: dict[str, list[dict[str, Any]]] = {}
     for f in sorted(d.glob('*.json'), key=lambda p: p.stem.rsplit('-', 2)[-2:]):
         r = json.loads(f.read_text(encoding='utf-8'))
         r['_npz'] = f.with_suffix('.npz')
-        runs.setdefault(r['machine']['model'], []).append(r)
+        runs.setdefault(group(r), []).append(r)
     return runs
 
 
 def summary(d: Path) -> str:
     runs = load(d)
-    models = [m for m in MODELS if m in runs]
+    models = [m for m in ORDER if m in runs] + sorted(m for m in runs if m not in ORDER)
     first = runs[models[0]][0]
     mi, n = first['machine'], first['n']
     reps = sorted({len(runs[m]) for m in models})
+    sizes = {runs[m][0]['n'] for m in models}
+    count = f'{n:,} items · ' if len(sizes) == 1 else ''
     lines = [f'# Benchmark: {d.name}', '',
-             f"{n:,} items · {', '.join(f'{m} × {len(runs[m])}' for m in models)} runs · {mi['cpu']} "
+             f"{count}{', '.join(f'{m} × {len(runs[m])}' for m in models)} runs · {mi['cpu']} "
              f"({mi['logical_cpus']} logical CPUs, {mi['available_cpus']} available) · {mi['platform']} · "
              f"Python {mi['python']} · prophet {mi['versions']['prophet']} · prophet-batch {prophet_batch_label(mi)}"
              f" · examples {mi['commits']['prophet-batch-examples']}", '']
@@ -72,7 +80,8 @@ def summary(d: Path) -> str:
         rs = runs[m]
         per_rep = [max(row['workers'] for row in r['rows']) for r in rs]
         workers = f'{per_rep[0]} workers' if len(set(per_rep)) == 1 else f"workers {'/'.join(map(str, per_rep))} by repetition"
-        lines += [f'### {MODEL_LABEL.get(m, m)} ({workers})', '',
+        size = '' if len(sizes) == 1 else f"{rs[0]['n']:,} series, "
+        lines += [f'### {MODEL_LABEL.get(m, m)} ({size}{workers})', '',
                   '| method | workers | fit s | forecast s | total s | vs stock pool |', '|---|---:|---:|---:|---:|---:|']
         for i, row in enumerate(rs[0]['rows']):
             same = [r['rows'][i] for r in rs]

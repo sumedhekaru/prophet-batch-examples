@@ -31,6 +31,8 @@ def load_calendar(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 class ModelSpec:
     """A picklable `make_model(series_id)` for one variant, plus the regressor values it needs."""
 
+    freq = 'D'
+
     def __init__(self, variant: str, data_dir: Path) -> None:
         if variant not in VARIANTS:
             raise ValueError(f'unknown model variant {variant!r}; choose from {VARIANTS}')

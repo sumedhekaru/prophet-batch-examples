@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r /tmp/pkgs/requirements.txt $(ls /tmp/pkgs/*.wh
     && rm -rf /tmp/pkgs
 
 WORKDIR /app
+COPY examples_core/ examples_core/
 COPY walmart_grocery_forecasting/__init__.py walmart_grocery_forecasting/
 COPY walmart_grocery_forecasting/pipeline/ walmart_grocery_forecasting/pipeline/
 COPY walmart_grocery_forecasting/envs/docker/entrypoint.sh /app/entrypoint.sh

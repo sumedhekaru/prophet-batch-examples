@@ -23,6 +23,6 @@ while [ "$rep" -le "${REPS:-1}" ]; do
 done
 if [ -n "$REPS" ]; then
   OUT=walmart_grocery_forecasting/results/runs/$SUB
-  uv run python -m walmart_grocery_forecasting.pipeline.bench_summary "$OUT" > "$OUT/summary.md"
+  uv run python -m examples_core.bench_summary "$OUT" > "$OUT/summary.md"
   echo "summary: $OUT/summary.md"
 fi
