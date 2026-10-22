@@ -11,3 +11,4 @@ walmart_grocery_forecasting/pipeline/__pycache__/
 !public_datasets/pipeline/
 !public_datasets/envs/docker/
 public_datasets/pipeline/__pycache__/
+!public_datasets/envs/dataproc/

@@ -36,6 +36,8 @@ import pandas as pd
 from examples_core.records import (MemoryRecorder, available_cpus, footprint_gb, machine_info, prophet_batch_label,
                                    utf8_stdout)
 
+from .prepare import base_name, meta_path
+
 COLUMNS = ['ds', 'yhat', 'yhat_lower', 'yhat_upper']
 _DONE = object()
 
@@ -64,7 +66,7 @@ def writer(out_dir: Path, inp: queue.Queue, log: list) -> None:
 def main() -> int:
     utf8_stdout()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('csv', type=Path, help='prepared CSV (prepare.py) with its .json next to it')
+    p.add_argument('csv', type=Path, help='prepared CSV or .csv.gz (prepare.py) with its .json next to it')
     p.add_argument('--series-per-batch', type=int, default=1000)
     p.add_argument('--workers', type=int, default=available_cpus())
     p.add_argument('--out', type=Path, default=None, help='output directory (default: <csv name>-out/)')
@@ -72,8 +74,8 @@ def main() -> int:
     a = p.parse_args()
     from prophet_batch import Pool
 
-    meta = json.loads(a.csv.with_suffix('.json').read_text())
-    out_dir = a.out or a.csv.with_name(a.csv.stem + '-out')
+    meta = json.loads(meta_path(a.csv).read_text())
+    out_dir = a.out or a.csv.with_name(base_name(a.csv) + '-out')
     out_dir.mkdir(parents=True, exist_ok=True)
     chunk_rows = meta['rows_per_series'] * a.series_per_batch
     memory = MemoryRecorder()
@@ -118,7 +120,7 @@ def main() -> int:
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     runs = Path(__file__).resolve().parent / 'results' / 'runs'
     runs.mkdir(parents=True, exist_ok=True)
-    (runs / f'{a.csv.stem}-{stamp}.json').write_text(json.dumps(record, default=str), encoding='utf-8')
+    (runs / f'{base_name(a.csv)}-{stamp}.json').write_text(json.dumps(record, default=str), encoding='utf-8')
     print(f'\n{series:,} series from {a.csv.name} ({record["input_mb"]:,.0f} MB) in {total:.1f} s '
           f'({series / total:,.0f} series/s); stages (summed, they overlap): read {stage["read"]:.1f} s, '
           f'forecast {stage["forecast"]:.1f} s, write {stage["write"]:.1f} s; peak memory {peak:.2f} GB '

@@ -1,0 +1,328 @@
+"""A use case on Spark: one method per run, every phase timed, every task recorded (benchmark protocol, track F5).
+
+Shared by the use cases' Spark jobs (walmart_grocery_forecasting.pipeline.spark_job, public_datasets.pipeline.spark_job),
+which only load their data (see run_job):
+
+  batch  series hashed into --groups groups; groupBy(group).applyInPandas runs fit_many + predict_many on each group
+         (many series per task; history_uncertainty='analytic', only the interval columns returned)
+  stock  groupBy(series).applyInPandas runs Prophet().fit + predict on each series (one series per task)
+Both forecast history + the horizon (as run.py). Phase timestamps (time.time(), UTC epoch): script_start,
+session_ready, executors_ready, load_done, execute_start, execute_end, write_start, and write_end (in
+<run-id>.end.json, written last). Provisioning and shutdown come from the platform (Dataproc's batch state history);
+spark_summary.py combines them. Each output row carries the task's host, pid, start and end, so the parallelism
+actually used is measured, not assumed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import socket
+import tempfile
+import time
+import zlib
+from pathlib import Path
+from typing import Any, Callable
+
+import numpy as np
+import pandas as pd
+
+from examples_core.forecast import Result
+from examples_core.records import evaluate, machine_info
+
+
+def _process_start() -> float | None:
+    """This process's start time (epoch s), from /proc (Linux); None elsewhere."""
+    try:
+        ticks = int(Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()[19])
+        boot = next(int(line.split()[1]) for line in Path('/proc/stat').read_text().splitlines()
+                    if line.startswith('btime'))
+        return boot + ticks / os.sysconf('SC_CLK_TCK')
+    except Exception:
+        return None
+
+
+PROCESS_START = _process_start()
+MODULE_LOADED = time.time()  # when a Python worker finished importing this module (and its imports)
+BANDS = ['yhat', 'yhat_lower', 'yhat_upper']
+OUT_SCHEMA = ('unique_id string, step int, yhat double, yhat_lower double, yhat_upper double, lp double, '
+              'host string, pid int, t0 double, t1 double, proc_start double, module_loaded double')
+
+
+def _quiet() -> None:
+    import logging
+
+    logging.getLogger('cmdstanpy').disabled = True
+    logging.getLogger('prophet').setLevel(logging.WARNING)
+
+
+def _rows(sid: str, bands: np.ndarray, lp: float, t0: float, t1: float, horizon: int) -> pd.DataFrame:
+    return pd.DataFrame({'unique_id': sid, 'step': np.arange(horizon, dtype=np.int32), 'yhat': bands[0],
+                         'yhat_lower': bands[1], 'yhat_upper': bands[2], 'lp': lp, 'host': socket.gethostname(),
+                         'pid': os.getpid(), 't0': t0, 't1': t1, 'proc_start': PROCESS_START,
+                         'module_loaded': MODULE_LOADED})
+
+
+def stock_series(pdf: pd.DataFrame, horizon: int, freq: str) -> pd.DataFrame:
+    """One series: Prophet().fit + predict (seeded like run.py's stock side)."""
+    t0 = time.time()
+    from prophet import Prophet
+
+    _quiet()
+    sid = str(pdf['unique_id'].iloc[0])
+    m = Prophet().fit(pdf[['ds', 'y']].sort_values('ds'))
+    np.random.seed(zlib.crc32(sid.encode()))
+    fc = m.predict(m.make_future_dataframe(horizon, freq=freq)).tail(horizon)
+    return _rows(sid, fc[BANDS].to_numpy().T, float(m.params['lp__'][0, 0]), t0, time.time(), horizon)
+
+
+def batch_group(pdf: pd.DataFrame, horizon: int, freq: str) -> pd.DataFrame:
+    """A group of series: fit_many + predict_many in this task (one process)."""
+    t0 = time.time()
+    from prophet_batch import fit_many, predict_many
+
+    _quiet()
+    models = fit_many(pdf[['unique_id', 'ds', 'y']], n_jobs=1)
+    fcs = predict_many(models, periods=horizon, freq=freq, seed=0, history_uncertainty='analytic', columns=BANDS)
+    t1 = time.time()
+    return pd.concat([_rows(str(sid), fcs[sid].tail(horizon).to_numpy().T, float(m.params['lp__'][0, 0]), t0, t1,
+                            horizon) for sid, m in models.items()], ignore_index=True)
+
+
+def udfs(horizon: int, freq: str) -> tuple[Callable[[pd.DataFrame], pd.DataFrame], ...]:
+    """(stock, batch) pandas UDFs for this horizon and frequency. Their bodies call the module's functions, which
+    Spark's pickling sends by reference, so each worker reads its own PROCESS_START / MODULE_LOADED."""
+
+    def stock(pdf: pd.DataFrame) -> pd.DataFrame:
+        return stock_series(pdf, horizon, freq)
+
+    def batch(pdf: pd.DataFrame) -> pd.DataFrame:
+        return batch_group(pdf, horizon, freq)
+
+    return stock, batch
+
+
+def _to_result(method: str, out: pd.DataFrame, seconds: float, workers: int, horizon: int) -> Result:
+    out = out.sort_values(['unique_id', 'step'])
+    ids = list(dict.fromkeys(out['unique_id']))
+    arr = {k: out[k].to_numpy().reshape(len(ids), horizon) for k in BANDS}
+    lp = out.groupby('unique_id', sort=True)['lp'].first().loc[ids].to_numpy()
+    return Result(method, workers, ids, arr['yhat'], arr['yhat_lower'], arr['yhat_upper'], lp, seconds, 0.0, len(ids))
+
+
+def task_stats(out: pd.DataFrame, execute_s: float, cores: int) -> dict:
+    """Parallelism actually used, from the per-task records (a task = one series for stock, one group for batch)."""
+    tasks = out.drop_duplicates(['host', 'pid', 't0', 't1'])[['host', 'pid', 't0', 't1']]
+    busy = float((tasks['t1'] - tasks['t0']).sum())
+    events = sorted([(t, 1) for t in tasks['t0']] + [(t, -1) for t in tasks['t1']])
+    level = peak = 0
+    for _, step in events:
+        level += step
+        peak = max(peak, level)
+    return {'tasks': len(tasks), 'hosts': int(tasks['host'].nunique()),
+            'processes': int(tasks[['host', 'pid']].drop_duplicates().shape[0]), 'max_concurrent': peak,
+            'task_seconds_sum': busy, 'task_seconds_median': float((tasks['t1'] - tasks['t0']).median()),
+            'core_utilisation': busy / (execute_s * cores) if execute_s > 0 and cores else None,
+            'per_host_tasks': {str(h): int(n) for h, n in tasks['host'].value_counts().items()}}
+
+
+def task_records(out: pd.DataFrame) -> list[dict]:
+    """One record per task: host, pid, start, end, series processed."""
+    g = out.groupby(['host', 'pid', 't0', 't1', 'proc_start', 'module_loaded'], dropna=False)['unique_id'] \
+        .nunique().reset_index(name='items')
+    return g.sort_values('t0').to_dict('records')
+
+
+WARM_SCHEMA = 'host string, pid int, proc_start double, module_loaded double, t0 double, t1 double'
+
+
+def warm(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Warm-up task (a pandas UDF, so it starts the same Python worker pool as the timed work): import
+    prophet-batch and Prophet before execute.
+    """
+    t0 = time.time()
+    import prophet_batch  # noqa: F401
+
+    time.sleep(1.0)  # long enough that every worker slot gets one task
+    return pd.DataFrame([{'host': socket.gethostname(), 'pid': os.getpid(), 'proc_start': PROCESS_START,
+                          'module_loaded': MODULE_LOADED, 't0': t0, 't1': time.time()}])
+
+
+def stage_metrics(sc: Any, since: float) -> list[dict] | str:
+    """Spark's own per-stage metrics (REST API of the driver's UI) for stages submitted after `since` (epoch s)."""
+    import urllib.request
+    from datetime import datetime
+
+    try:
+        url = f'{sc.uiWebUrl}/api/v1/applications/{sc.applicationId}/stages'
+        with urllib.request.urlopen(url, timeout=10) as r:
+            stages = json.load(r)
+    except Exception as e:  # UI disabled or unreachable
+        return f'unavailable: {e}'
+
+    def ts(v: str | None) -> float | None:
+        return datetime.strptime(v, '%Y-%m-%dT%H:%M:%S.%f%Z').timestamp() if v else None
+
+    keep = ('stageId', 'name', 'status', 'numTasks', 'executorRunTime', 'executorCpuTime', 'executorDeserializeTime',
+            'jvmGcTime', 'resultSerializationTime', 'shuffleReadBytes', 'shuffleWriteBytes', 'shuffleWriteTime',
+            'inputBytes', 'outputBytes')
+    out = []
+    for st in stages:
+        sub, done = ts(st.get('submissionTime')), ts(st.get('completionTime'))
+        if sub is None or sub < since - 1:
+            continue
+        rec = {k: st.get(k) for k in keep}
+        rec.update(submitted=sub, completed=done, duration=(done - sub) if done else None)
+        out.append(rec)
+    return sorted(out, key=lambda r: r['submitted'])
+
+
+def copy(spark: Any, src: str, dst: str) -> None:
+    """Copy a file between the local disk and a Hadoop filesystem URI (gs://, file://) through Spark."""
+    jvm = spark._jvm
+    conf = spark._jsc.hadoopConfiguration()
+    src_path, dst_path = jvm.org.apache.hadoop.fs.Path(src), jvm.org.apache.hadoop.fs.Path(dst)
+    if dst.startswith('gs://'):
+        dst_path.getFileSystem(conf).copyFromLocalFile(False, True, src_path, dst_path)
+    else:
+        src_path.getFileSystem(conf).copyToLocalFile(False, src_path, dst_path, True)
+
+
+def fetch(spark: Any, data: str, names: list[str], local: Path) -> None:
+    """Copy data/<name> (a URI directory) to local/<name> for each name (subdirectories created)."""
+    for name in names:
+        (local / name).parent.mkdir(parents=True, exist_ok=True)
+        copy(spark, f"{data.rstrip('/')}/{name}", f'file://{local / name}')
+
+
+class Loaded:
+    """What a use case's loader returns: the long training frame (unique_id, ds, y), the wide train / test frames
+    for the metrics (one row per series), the horizon, frequency and MASE season, and extra record fields."""
+
+    def __init__(self, long_df: pd.DataFrame, train_wide: pd.DataFrame, test_wide: pd.DataFrame, horizon: int,
+                 freq: str, season: int, extra: dict[str, Any] | None = None) -> None:
+        self.long_df, self.train_wide, self.test_wide = long_df, train_wide, test_wide
+        self.horizon, self.freq, self.season, self.extra = horizon, freq, season, extra or {}
+
+
+def run_job(argv: list[str] | None, name: str, doc: str, add_args: Callable[[argparse.ArgumentParser], None],
+            load: Callable[[Any, argparse.Namespace, Path], Loaded]) -> int:
+    """The whole job: session, executors, load (the use case's `load(spark, args, local_dir)`), warm-up, execute,
+    accuracy, records written to --out."""
+    marks = {'script_start': time.time()}
+    from pyspark.sql import SparkSession
+
+    p = argparse.ArgumentParser(description=doc, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--data', required=True, help='directory (URI) with the input files')
+    p.add_argument('--out', required=True, help='directory (URI) for the results')
+    p.add_argument('--method', choices=('batch', 'stock'), required=True)
+    p.add_argument('--groups', type=int, default=0, help='series groups for batch (default: 4 per executor core)')
+    p.add_argument('--run-id', default=None, help='label for the output files (e.g. the batch id)')
+    p.add_argument('--wait', type=int, default=600, help='seconds to wait for executors (default 600)')
+    p.add_argument('--warmup', action='store_true',
+                   help='start every Python worker and import prophet-batch before execute (timed as its own phase)')
+    p.add_argument('--explore', default='',
+                   help='batch only: comma-separated group counts to run one after another (exploration, F6)')
+    add_args(p)
+    a = p.parse_args(argv)
+
+    spark = SparkSession.builder.appName(f'{name}-{a.method}').getOrCreate()
+    sc = spark.sparkContext
+    spark.conf.set('spark.sql.execution.arrow.pyspark.enabled', 'true')
+    marks['session_ready'] = time.time()
+
+    local_mode = sc.master.startswith('local')
+    expected = int(sc.getConf().get('spark.executor.instances', '0') or 0)
+    tracker = sc._jsc.sc().statusTracker()
+    seen = []
+    while not local_mode:
+        seen.append(len(tracker.getExecutorInfos()) - 1)  # minus the driver
+        if (expected and seen[-1] >= expected) or time.time() - marks['session_ready'] > a.wait:
+            break
+        time.sleep(0.5)
+    executors = 0 if local_mode else len(tracker.getExecutorInfos()) - 1
+    marks['executors_ready'] = time.time()
+    if not local_mode and executors == 0:
+        raise SystemExit('no executors registered; stopping')
+    cores = sc.defaultParallelism
+    print(f'master {sc.master}; executors {executors}/{expected}; parallelism {cores}', flush=True)
+
+    local = Path(tempfile.mkdtemp())
+    d = load(spark, a, local)
+    long_df, h = d.long_df, d.horizon
+    stock_udf, batch_udf = udfs(h, d.freq)
+    groups = a.groups or 4 * cores
+    # Spark's adaptive execution would merge the post-shuffle partitions of this small (in bytes) data into one or two
+    # tasks, serialising the work; keep one partition per 1/4 core for both methods.
+    spark.conf.set('spark.sql.adaptive.coalescePartitions.enabled', 'false')
+    spark.conf.set('spark.sql.shuffle.partitions', str(4 * cores))
+    long_df['group'] = [zlib.crc32(s.encode()) % groups for s in long_df['unique_id']]
+    explore = [int(x) for x in a.explore.split(',') if x]
+    for g in explore:
+        long_df[f'g{g}'] = [zlib.crc32(s.encode()) % g for s in long_df['unique_id']]
+    sdf = spark.createDataFrame(long_df).cache()
+    sdf.count()
+    marks['load_done'] = time.time()
+    warmup = None
+    if a.warmup or explore:
+        rows = spark.range(cores).groupBy('id').applyInPandas(warm, WARM_SCHEMA).toPandas()
+        marks['warmup_done'] = time.time()
+        warmup = {'seconds': marks['warmup_done'] - marks['load_done'], 'workers': rows.to_dict('records')}
+        print(f"warmup {warmup['seconds']:.1f} s; {rows[['host', 'pid']].drop_duplicates().shape[0]} Python workers",
+              flush=True)
+    variants = []
+    for g in explore:
+        t0 = time.time()
+        res = sdf.groupBy(f'g{g}').applyInPandas(batch_udf, OUT_SCHEMA).toPandas()
+        t1 = time.time()
+        variants.append({'groups': g, 'execute_s': t1 - t0, 'tasks': task_stats(res, t1 - t0, cores),
+                         'task_records': task_records(res), 'stages': stage_metrics(sc, t0)})
+        print(f'explore groups {g}: execute {t1 - t0:.1f} s; utilisation '
+              f"{100 * variants[-1]['tasks']['core_utilisation']:.0f}%", flush=True)
+
+    n = len(d.train_wide)
+    print(f'{a.method}: {n:,} series; groups {groups if a.method == "batch" else "-"}', flush=True)
+    marks['execute_start'] = time.time()
+    if a.method == 'batch':
+        out = sdf.groupBy('group').applyInPandas(batch_udf, OUT_SCHEMA).toPandas()
+    else:
+        out = sdf.groupBy('unique_id').applyInPandas(stock_udf, OUT_SCHEMA).toPandas()
+    marks['execute_end'] = time.time()
+    execute_s = marks['execute_end'] - marks['execute_start']
+    print(f'{a.method}: execute {execute_s:.1f} s', flush=True)
+
+    r = _to_result(a.method, out, execute_s, cores, h)
+    acc = evaluate(r, d.train_wide, d.test_wide, d.season)
+    run_id = a.run_id or f'{a.method}-{time.strftime("%Y%m%d-%H%M%S")}'
+    marks['write_start'] = time.time()
+    record = {
+        'run_id': run_id, 'method': a.method, 'n': n, 'groups': groups if a.method == 'batch' else None,
+        **d.extra,
+        'marks': marks, 'spark': {'version': spark.version, 'master': sc.master, 'default_parallelism': cores,
+                                  'executors': executors, 'executors_expected': expected,
+                                  'executors_seen': seen[-5:], 'conf': {k: v for k, v in sc.getConf().getAll()
+                                                                        if k.startswith(('spark.executor',
+                                                                                         'spark.driver.cores',
+                                                                                         'spark.dynamicAllocation'))},
+                                  'shuffle_partitions': spark.conf.get('spark.sql.shuffle.partitions'),
+                                  'coalesce_partitions': spark.conf.get(
+                                      'spark.sql.adaptive.coalescePartitions.enabled')},
+        'machine': machine_info(), 'tasks': task_stats(out, execute_s, cores),
+        'accuracy': acc['summary'], 'per_series': {k: v.tolist() for k, v in acc['per_series'].items()},
+        'lp': r.lp.tolist(), 'ids': r.ids,
+        'task_records': task_records(out), 'stages': stage_metrics(sc, marks['execute_start']),
+        'warmup': warmup, 'explore': variants,
+    }
+    (local / f'{run_id}.json').write_text(json.dumps(record, indent=1, default=str), encoding='utf-8')
+    np.savez_compressed(local / f'{run_id}.npz', ids=np.array(r.ids), yhat=r.yhat, lower=r.lower, upper=r.upper)
+    for suffix in ('json', 'npz'):
+        copy(spark, f'file://{local / f"{run_id}.{suffix}"}', f"{a.out.rstrip('/')}/{run_id}.{suffix}")
+    end = local / f'{run_id}.end.json'  # results written: the rest until the platform's end time is shutdown
+    end.write_text(json.dumps({'write_end': time.time()}), encoding='utf-8')
+    copy(spark, f'file://{end}', f"{a.out.rstrip('/')}/{end.name}")
+    print(json.dumps({'run_id': run_id, 'execute_s': execute_s, 'tasks': record['tasks']['tasks'],
+                      'hosts': record['tasks']['hosts'], 'max_concurrent': record['tasks']['max_concurrent'],
+                      'wape': acc['summary']['wape']}), flush=True)
+    spark.stop()
+    return 0
