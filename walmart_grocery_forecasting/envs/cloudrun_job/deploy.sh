@@ -3,6 +3,8 @@
 #   PROJECT  GCP project id      REGION  e.g. us-east1      BUCKET  bucket name (created if missing)
 #   MODELS   variants to run, in order (default: "default events events_snap")
 #   CPU / MEMORY  job size (default 4 vCPU / 8Gi: enough for 1,437 items; the pool uses one worker per vCPU)
+#   REPS     benchmark: REPS repetitions (each execution on a fresh instance) into results/runs/cloudrun-bench-<stamp>/
+#            + summary.md (pipeline/bench_summary.py)
 #   PROJECT=my-project REGION=us-east1 BUCKET=my-bucket sh walmart_grocery_forecasting/envs/cloudrun_job/deploy.sh
 # Results: gs://$BUCKET/results/ (copied to results/runs/ at the end). Remove everything with teardown.sh.
 set -e
@@ -33,10 +35,25 @@ gcloud run jobs deploy walmart-forecast --project "$PROJECT" --region "$REGION" 
   --add-volume name=gcs,type=cloud-storage,bucket="$BUCKET" --add-volume-mount volume=gcs,mount-path=/mnt/gcs \
   --set-env-vars DATA_DIR=/mnt/gcs/data/m5,OUT_DIR=/mnt/gcs/results,RUN_ENV=cloudrun
 
-# 4. One execution per model variant, then the results back to results/runs/
-for model in $MODELS; do
-  echo "== $model"
-  gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --args=--model,"$model" --wait
+# 4. One execution per model variant (REPS times), then the results back to results/runs/
+SUB= ARGS=
+if [ -n "$REPS" ]; then SUB=cloudrun-bench-$(date +%Y%m%d-%H%M%S) ARGS=",--out,/mnt/gcs/results/$SUB"; fi
+rep=1
+while [ "$rep" -le "${REPS:-1}" ]; do
+  for model in $MODELS; do
+    echo "== $model (repetition $rep)"
+    gcloud run jobs execute walmart-forecast --project "$PROJECT" --region "$REGION" --args=--model,"$model$ARGS" --wait \
+      || echo "execution FAILED: $model (repetition $rep)"
+  done
+  rep=$((rep + 1))
 done
 mkdir -p walmart_grocery_forecasting/results/runs
-gcloud storage cp "gs://$BUCKET/results/*" walmart_grocery_forecasting/results/runs/
+if [ -n "$REPS" ]; then
+  OUT=walmart_grocery_forecasting/results/runs/$SUB
+  mkdir -p "$OUT"
+  gcloud storage cp "gs://$BUCKET/results/$SUB/*" "$OUT/"
+  uv run python -m walmart_grocery_forecasting.pipeline.bench_summary "$OUT" > "$OUT/summary.md"
+  echo "summary: $OUT/summary.md"
+else
+  gcloud storage cp "gs://$BUCKET/results/*" walmart_grocery_forecasting/results/runs/
+fi
