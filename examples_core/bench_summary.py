@@ -35,14 +35,14 @@ def _stat(xs: list[float], fmt: str = '{:,.1f}') -> str:
 
 
 def _forecasts(path: Path) -> dict[str, np.ndarray]:
-    """Forecast arrays keyed by method and column, without the worker count (it can differ between repetitions)."""
+    """Forecast arrays keyed by method and column, without the worker count (it can differ between repetitions).
+    prophet-batch: the n_jobs=1 run when it covers every series (bit-identical to n_jobs=many), else n_jobs=many."""
     with np.load(path) as z:
-        out = {}
-        for k in z.files:
-            if k.startswith(('stock_pool', 'batch')):
-                method, workers, col = k.rsplit('_', 2)
-                if method == 'stock_pool' or workers == '1':  # batch: n_jobs=1 (bit-identical to n_jobs=many)
-                    out[f'{method}_{col}'] = z[k]
+        out: dict[str, np.ndarray] = {}
+        keys = [k for k in z.files if k.startswith(('stock_pool', 'batch'))]
+        for k in sorted(keys, key=lambda k: k.rsplit('_', 2)[1] == '1'):  # n_jobs=1 last, so it wins
+            method, _, col = k.rsplit('_', 2)
+            out[f'{method}_{col}'] = z[k]
         return out
 
 
@@ -95,7 +95,8 @@ def summary(d: Path) -> str:
     lines += ['¹ Timed on a sample (30 items), extrapolated. With different worker counts by repetition, the workers '
               'column shows the first repetition\'s.', '']
 
-    lines += ['## Accuracy on the 28 held-out days (first repetition)', '',
+    held = 'the 28 held-out days' if 'dataset' not in mi else 'the held-out steps of each dataset'
+    lines += [f'## Accuracy on {held} (first repetition)', '',
               '| model | method | WAPE | sMAPE | MASE | Δ MASE vs stock (± 2 SE) | 80% coverage |',
               '|---|---|---:|---:|---:|---:|---:|']
     for m in models:
@@ -114,7 +115,7 @@ def summary(d: Path) -> str:
         keys = list(rs[0]['checks'])
         bit = all(v is True for r in rs for k, v in r['checks'].items() if 'bit-identical' in k)
         lp = min(float(r['checks'][k]) for r in rs for k in keys if k.startswith('log posterior ≥'))
-        fb = sorted({r['checks']['series fit by Stan (fallbacks)'] for r in rs})
+        fb = sorted({v for r in rs for k, v in r['checks'].items() if k.startswith('series fit by Stan')})
         base = _forecasts(rs[0]['_npz'])
         diff: dict[str, float] = {}
         for r in rs[1:]:

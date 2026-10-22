@@ -7,3 +7,7 @@ examples_core/__pycache__/
 !walmart_grocery_forecasting/envs/docker/
 walmart_grocery_forecasting/pipeline/__pycache__/
 !walmart_grocery_forecasting/envs/dataproc/
+!public_datasets/__init__.py
+!public_datasets/pipeline/
+!public_datasets/envs/docker/
+public_datasets/pipeline/__pycache__/
