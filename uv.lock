@@ -1133,16 +1133,16 @@ wheels = [
 
 [[package]]
 name = "prophet-batch"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "prophet" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/30/587b42e478ba927026f860fef3dffc5d3bbd07706a9bdfea8a11d1875fc9/prophet_batch-0.1.1.tar.gz", hash = "sha256:0611ece1d7805d8035b13e681e9872567f40c0b52c108277fe5e8c7119e27268", size = 300159, upload-time = "2026-10-22T03:51:13.823Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/0b/37501ced56557262a8f687c6bd8d7c04ad12001f3014a3170c31ccbb5901/prophet_batch-0.1.2.tar.gz", hash = "sha256:4188b2b77505aa53551f4c44b6f6d576062fdcdd3055b1320a65795c2b09fdd0", size = 321533, upload-time = "2026-10-22T21:06:16.257Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4f/a8/ec2893181de46d36c10f2e6217ebe45057373b6ae09e92aeff0aff47c405/prophet_batch-0.1.1-py3-none-any.whl", hash = "sha256:f4f05b133b1b65199b8e3c9e635aff58d904142498cfcb79b983e321faa3b6fe", size = 40788, upload-time = "2026-10-22T03:51:12.369Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/e1/f7577d002d6329818d70dc4bc8c05ae0321de98e021585195033f6d12670/prophet_batch-0.1.2-py3-none-any.whl", hash = "sha256:e41f6be4438b53e5a0924b044cc293f9f8bf8f04ef5ee4ff82914fe50b418e4f", size = 52783, upload-time = "2026-10-22T21:06:14.581Z" },
 ]
 
 [[package]]
@@ -1163,7 +1163,7 @@ notebook = [
 [package.metadata]
 requires-dist = [
     { name = "prophet", specifier = "==1.5.0" },
-    { name = "prophet-batch", specifier = "==0.1.1" },
+    { name = "prophet-batch", specifier = "==0.1.2" },
 ]
 
 [package.metadata.requires-dev]

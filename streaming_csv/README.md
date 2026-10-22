@@ -34,5 +34,4 @@ full frame (history rows and every component) is the default of `forecast_many`;
 a database (`SELECT ... ORDER BY series_id` through a server-side cursor, `fetchmany`; write with a bulk insert or
 `COPY`), or Spark (`mapInPandas` per partition, as in the Dataproc example).
 
-Status: needs prophet-batch 0.1.2 (`forecast_many`, `Pool`), not yet released; run it with
-`PROPHET_BATCH_LOCAL=../prophet-batch` (see the repository README).
+Uses `forecast_many` and `Pool` (prophet-batch ≥ 0.1.2, installed from PyPI by `uv sync`).

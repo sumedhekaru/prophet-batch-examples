@@ -16,7 +16,7 @@ Status: in development. The first use case runs locally, in a local Linux contai
 |---|---|---|
 | [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 7.4–11× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run, Spark, Windows) |
 | [public_datasets](public_datasets/) | M5 item and item × store, M4 Daily / Weekly / Hourly, Tourism Monthly: 38,905 series | Same accuracy and a better fit than Stan across six datasets and four frequencies; speed at scale (30,490 series) |
-| [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB) | A file of any size forecast in batches, read / forecast / write at the same time, with flat memory and restartable output (needs prophet-batch 0.1.2) |
+| [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB) | A file of any size forecast in batches, read / forecast / write at the same time, with flat memory and restartable output |
 
 ## Layout
 
@@ -44,12 +44,12 @@ and `uv.lock` (what `pip install prophet-batch` gives you), so the results here 
 ```
 git clone https://github.com/sumedhekaru/prophet-batch-examples.git
 cd prophet-batch-examples
-uv sync          # Python 3.12, prophet==1.5.0 and prophet-batch==0.1.1 from PyPI, jupyter
+uv sync          # Python 3.12, prophet==1.5.0 and prophet-batch==0.1.2 from PyPI, jupyter
 ```
 
 Developing prophet-batch itself: with a checkout of it next to this repo, `PROPHET_BATCH_LOCAL=../prophet-batch` runs
 the scripts against that checkout instead (`uv run --with-editable` locally, a wheel built from it in the images).
-Each run record says which was used: `prophet-batch 0.1.1 (PyPI)` or `prophet-batch 0.1.1 (local <commit>)`.
+Each run record says which was used: `prophet-batch 0.1.2 (PyPI)` or `prophet-batch 0.1.2 (local <commit>)`.
 
 ## Principles
 
