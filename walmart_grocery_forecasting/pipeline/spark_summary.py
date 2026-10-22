@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .run import prophet_batch_label
+
 PHASES = ['provision', 'driver_start', 'executors', 'load', 'warmup', 'execute', 'post', 'shutdown', 'end_to_end']
 
 
@@ -93,7 +95,7 @@ def summarize(directory: Path) -> str:
              f"{len(runs)} runs · {first['n']:,} items · Spark {sp['version']} · master `{sp['master']}` · "
              f"{sp['executors']} executors, parallelism {sp['default_parallelism']} · shuffle partitions "
              f"{sp.get('shuffle_partitions')} · prophet {mi['versions']['prophet']} · prophet-batch "
-             f"{mi['commits']['prophet-batch']} · examples {mi['commits']['prophet-batch-examples']}", '',
+             f"{prophet_batch_label(mi)} · examples {mi['commits']['prophet-batch-examples']}", '',
              '## Phases (seconds: median, (min–max) over repetitions)', '',
              '| phase | ' + ' | '.join(f'{m} (n={len(by[m])})' for m in methods) + ' |',
              '|---|' + '---:|' * len(methods)]

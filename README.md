@@ -33,15 +33,18 @@ walmart_grocery_forecasting/
 
 ## Setup
 
-Needs [uv](https://docs.astral.sh/uv/) and a clone of prophet-batch next to this repo, so the examples run its latest
-code (prophet-batch itself is on PyPI: `pip install prophet-batch`):
+Needs [uv](https://docs.astral.sh/uv/). prophet-batch is installed from PyPI, pinned to a release in `pyproject.toml`
+and `uv.lock` (what `pip install prophet-batch` gives you), so the results here are reproducible with released code:
 
 ```
-git clone https://github.com/sumedhekaru/prophet-batch.git
 git clone https://github.com/sumedhekaru/prophet-batch-examples.git
 cd prophet-batch-examples
-uv sync          # Python 3.12, prophet==1.5.0 from PyPI, prophet-batch (editable, ../prophet-batch), jupyter
+uv sync          # Python 3.12, prophet==1.5.0 and prophet-batch==0.1.1 from PyPI, jupyter
 ```
+
+Developing prophet-batch itself: with a checkout of it next to this repo, `PROPHET_BATCH_LOCAL=../prophet-batch` runs
+the scripts against that checkout instead (`uv run --with-editable` locally, a wheel built from it in the images).
+Each run record says which was used: `prophet-batch 0.1.1 (PyPI)` or `prophet-batch 0.1.1 (local <commit>)`.
 
 ## Principles
 

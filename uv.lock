@@ -1133,19 +1133,16 @@ wheels = [
 
 [[package]]
 name = "prophet-batch"
-version = "0.1.0"
-source = { editable = "../prophet-batch" }
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "prophet" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=1.21.6" },
-    { name = "pandas", specifier = ">=1.3.5" },
-    { name = "prophet", specifier = ">=1.5,<2" },
+sdist = { url = "https://files.pythonhosted.org/packages/9c/30/587b42e478ba927026f860fef3dffc5d3bbd07706a9bdfea8a11d1875fc9/prophet_batch-0.1.1.tar.gz", hash = "sha256:0611ece1d7805d8035b13e681e9872567f40c0b52c108277fe5e8c7119e27268", size = 300159, upload-time = "2026-10-22T03:51:13.823Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/a8/ec2893181de46d36c10f2e6217ebe45057373b6ae09e92aeff0aff47c405/prophet_batch-0.1.1-py3-none-any.whl", hash = "sha256:f4f05b133b1b65199b8e3c9e635aff58d904142498cfcb79b983e321faa3b6fe", size = 40788, upload-time = "2026-10-22T03:51:12.369Z" },
 ]
 
 [[package]]
@@ -1166,7 +1163,7 @@ notebook = [
 [package.metadata]
 requires-dist = [
     { name = "prophet", specifier = "==1.5.0" },
-    { name = "prophet-batch", editable = "../prophet-batch" },
+    { name = "prophet-batch", specifier = "==0.1.1" },
 ]
 
 [package.metadata.requires-dev]

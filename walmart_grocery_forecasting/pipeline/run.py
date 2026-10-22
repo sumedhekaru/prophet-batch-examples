@@ -17,7 +17,7 @@ import platform
 import subprocess
 import sys
 from datetime import datetime
-from importlib.metadata import version
+from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import Any
 
@@ -60,16 +60,38 @@ def available_cpus(cgroup: Path = Path('/sys/fs/cgroup')) -> int:
     return n
 
 
+def _git_commit(path: Path) -> str | None:
+    rev = _cmd('git', '-C', str(path), 'rev-parse', '--short', 'HEAD')
+    dirty = _cmd('git', '-C', str(path), 'status', '--porcelain', '--untracked-files=no')
+    return f'{rev}{"+dirty" if dirty else ""}' if rev else None
+
+
+def prophet_batch_source() -> dict[str, str | None]:
+    """Where prophet-batch came from: the package index (PyPI) or a local checkout (and its commit).
+
+    Index installs carry no direct_url.json (PEP 610); local ones (editable checkout or a wheel built from one) do. In
+    images built from a local checkout, PROPHET_BATCH_COMMIT names the commit the wheel was built from.
+    """
+    raw = distribution('prophet-batch').read_text('direct_url.json')
+    if not raw:
+        return {'source': 'pypi', 'commit': None}
+    url = json.loads(raw).get('url', '')
+    commit = os.environ.get('PROPHET_BATCH_COMMIT')
+    if not commit and url.startswith('file://'):
+        commit = _git_commit(Path(url.removeprefix('file://')))
+    return {'source': 'local', 'commit': commit}
+
+
+def prophet_batch_label(info: dict[str, Any]) -> str:
+    """'0.1.1 (PyPI)' or '0.1.1 (local abc1234)'; older records have only a commit."""
+    v, src = info['versions']['prophet-batch'], info.get('prophet_batch')
+    if src is None:
+        return f"{v} ({info['commits']['prophet-batch']})"
+    return f'{v} (PyPI)' if src['source'] == 'pypi' else f"{v} (local {src['commit']})"
+
+
 def machine_info() -> dict[str, Any]:
-    def commit(path: Path, env_var: str) -> str | None:
-        if os.environ.get(env_var):  # set in container images at build time
-            return os.environ[env_var]
-        rev = _cmd('git', '-C', str(path), 'rev-parse', '--short', 'HEAD')
-        dirty = _cmd('git', '-C', str(path), 'status', '--porcelain', '--untracked-files=no')
-        return f'{rev}{"+dirty" if dirty else ""}' if rev else None
-
-    import prophet_batch
-
+    pb = prophet_batch_source()
     return {
         'timestamp': datetime.now().isoformat(timespec='seconds'),
         'platform': platform.platform(),
@@ -79,9 +101,9 @@ def machine_info() -> dict[str, Any]:
         'available_cpus': available_cpus(),
         'python': sys.version.split()[0],
         'versions': {p: version(p) for p in ('prophet', 'prophet-batch', 'cmdstanpy', 'numpy', 'pandas')},
-        'commits': {'prophet-batch-examples': commit(HERE.parent, 'EXAMPLES_COMMIT'),
-                    'prophet-batch': commit(Path(prophet_batch.__file__).resolve().parents[2],
-                                            'PROPHET_BATCH_COMMIT')},
+        'prophet_batch': pb,
+        'commits': {'prophet-batch-examples': os.environ.get('EXAMPLES_COMMIT') or _git_commit(HERE.parent),
+                    'prophet-batch': pb['commit']},
         'thread_env': {v: os.environ.get(v) for v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
                                                       'VECLIB_MAXIMUM_THREADS')},
     }
@@ -120,8 +142,8 @@ def markdown(info: dict[str, Any], n: int, rows: list[dict[str, Any]], checks: d
     v = info['versions']
     lines = [f"# walmart_grocery_forecasting: {n:,} M5 FOODS items, 28-day holdout", '',
              f"{info['timestamp']} · {info['cpu']} ({info['logical_cpus']} logical CPUs) · {info['platform']} · "
-             f"Python {info['python']} · prophet {v['prophet']} · prophet-batch {v['prophet-batch']} "
-             f"({info['commits']['prophet-batch']}) · examples {info['commits']['prophet-batch-examples']}", '',
+             f"Python {info['python']} · prophet {v['prophet']} · prophet-batch {prophet_batch_label(info)} "
+             f"· examples {info['commits']['prophet-batch-examples']}", '',
              f"Model: `{info['model']}` (see pipeline/models.py)", '',
              '## Speed (fit + forecast of history and 28 days)', '',
              '| method | workers | fit s | forecast s | total s | vs stock pool |', '|---|---:|---:|---:|---:|---:|']

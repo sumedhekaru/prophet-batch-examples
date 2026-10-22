@@ -4,7 +4,8 @@
 #   PROJECT=... REGION=... BUCKET=... sh walmart_grocery_forecasting/envs/dataproc/benchmark.sh
 # Options: REPS (3), METHODS ("batch stock"), JOB_ARGS (extra job arguments, e.g. "--warmup"), EXECUTORS (2), CORES per executor (4), DRIVER_CORES (4), RUNTIME (2.3: runtime 3.0 runs
 # PySpark batches in local mode, see results), TEARDOWN (1). Output: results/runs/dataproc-bench-<stamp>/ with every
-# run's records, the batch resources (state history, DCU usage) and summary.md.
+# run's records, the batch resources (state history, DCU usage) and summary.md. prophet-batch: the PyPI release pinned
+# in uv.lock; PROPHET_BATCH_LOCAL=../prophet-batch builds the image from that checkout instead (see build.sh).
 set -e
 : "${PROJECT:?set PROJECT}" "${REGION:?set REGION}" "${BUCKET:?set BUCKET}"
 REPS="${REPS:-3}" EXECUTORS="${EXECUTORS:-2}" CORES="${CORES:-4}" DRIVER_CORES="${DRIVER_CORES:-4}"
@@ -36,10 +37,12 @@ TAG="$IMAGE" sh "$D/build.sh"
 docker push -q "$IMAGE" >/dev/null
 docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" > "$OUT/image-digest.txt"
 gcloud storage cp -n data/m5/sales_train_evaluation.csv data/m5/calendar.csv "gs://$BUCKET/data/m5/" >/dev/null 2>&1
+if [ -n "$PROPHET_BATCH_LOCAL" ]; then PB="local $(git -C "$PROPHET_BATCH_LOCAL" rev-parse --short HEAD)"
+else PB=$(uv export --no-default-groups --no-hashes --format requirements.txt 2>/dev/null | grep '^prophet-batch=='); fi
 cat > "$OUT/config.json" <<JSON
 {"project": "$PROJECT", "region": "$REGION", "runtime": "$RUNTIME", "reps": $REPS, "executors": $EXECUTORS,
  "executor_cores": $CORES, "driver_cores": $DRIVER_CORES, "properties": "$PROPS", "image": "$IMAGE",
- "examples_commit": "$(git rev-parse --short HEAD)", "prophet_batch_commit": "$(git -C ../prophet-batch rev-parse --short HEAD)"}
+ "examples_commit": "$(git rev-parse --short HEAD)", "prophet_batch": "$PB"}
 JSON
 
 # Runs: one method per batch, alternating order

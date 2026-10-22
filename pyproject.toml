@@ -5,7 +5,7 @@ description = "Runnable use cases for prophet-batch: accuracy and speed against 
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "prophet==1.5.0",
-    "prophet-batch",
+    "prophet-batch==0.1.1",
 ]
 
 [dependency-groups]
@@ -18,8 +18,3 @@ notebook = [
 [tool.uv]
 package = false
 default-groups = ["notebook"]
-
-[tool.uv.sources]
-# For now prophet-batch comes from a clone next to this repo
-# (github.com/sumedhekaru/prophet-batch); PyPI later.
-prophet-batch = { path = "../prophet-batch", editable = true }

@@ -1,7 +1,8 @@
 # Docker (local Linux image)
 
 The same pipeline as [local](../local/), in a Linux container: `python:3.12-slim`, runtime dependencies pinned from
-the repo's `uv.lock`, prophet-batch installed from a wheel built from the clone next to this repo.
+the repo's `uv.lock`, incl. prophet-batch from PyPI (`PROPHET_BATCH_LOCAL=../prophet-batch` builds it from a local
+checkout instead).
 
 ```sh
 sh walmart_grocery_forecasting/envs/docker/build.sh          # image prophet-batch-examples/walmart:local
