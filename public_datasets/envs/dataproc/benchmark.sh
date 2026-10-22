@@ -73,7 +73,12 @@ for dataset in $DATASETS; do
     done
     rep=$((rep + 1))
   done
-  gcloud storage cp "gs://$BUCKET/bench/$STAMP/$dataset/*" "$OUT/$dataset/" >/dev/null 2>&1 || log "copying $dataset results FAILED"
+  copied=0
+  for try in 1 2 3; do  # one large download failed once without retry (K4); errors go to copy.log
+    gcloud storage cp "gs://$BUCKET/bench/$STAMP/$dataset/*" "$OUT/$dataset/" >> "$OUT/copy.log" 2>&1 && { copied=1; break; }
+    sleep 10
+  done
+  [ "$copied" = 1 ] || log "copying $dataset results FAILED (see copy.log)"
   uv run python -m examples_core.spark_summary "$OUT/$dataset" > "$OUT/$dataset/summary.md" \
     && log "summary: $OUT/$dataset/summary.md" || log "summary FAILED for $dataset (raw results are in $OUT/$dataset)"
 done

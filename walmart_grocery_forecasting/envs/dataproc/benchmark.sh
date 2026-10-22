@@ -66,7 +66,12 @@ while [ "$rep" -le "$REPS" ]; do
 done
 
 # Results
-gcloud storage cp "gs://$BUCKET/bench/$STAMP/*" "$OUT/" >/dev/null 2>&1 || log "copying results FAILED"
+copied=0
+for try in 1 2 3; do  # a large download failed once without retry (K4); errors go to copy.log
+  gcloud storage cp "gs://$BUCKET/bench/$STAMP/*" "$OUT/" >> "$OUT/copy.log" 2>&1 && { copied=1; break; }
+  sleep 10
+done
+[ "$copied" = 1 ] || log "copying results FAILED (see copy.log)"
 uv run python -m walmart_grocery_forecasting.pipeline.spark_summary "$OUT" > "$OUT/summary.md" \
   && log "summary: $OUT/summary.md" || log "summary FAILED (raw results are in $OUT; rerun spark_summary)"
 if [ "$TEARDOWN" = 1 ]; then
