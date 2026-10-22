@@ -1,0 +1,2 @@
+# Keep LF line endings on every platform (Windows checkouts otherwise rewrite uv.lock and block git pull)
+* text=auto eol=lf
