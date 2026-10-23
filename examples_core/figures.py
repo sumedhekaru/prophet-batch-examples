@@ -342,7 +342,7 @@ def pattern(out: Path) -> None:
         arrow(x0, x1)
     ax.text(50, 7.5, 'Read, forecast and write overlap. At most ≈ 5 batches exist at once, so memory is set by the batch '
             'size, not the file:', ha='center', fontsize=9, color=INK)
-    ax.text(50, 3.6, '1,000,072 series (7.4 GB gzip) in 33 minutes on a laptop, main process ≤ 1.04 GB. '
+    ax.text(50, 3.6, '1,000,072 series in 33 minutes on a laptop with ≈ 2 GB in total, as for 3,000 series. '
             'A part that exists is skipped, so a stopped run resumes.', ha='center', fontsize=9, color=INK_2)
     ax.set_title('Forecasting a catalogue of any size with bounded memory', loc='left', fontsize=12, fontweight='bold',
                  color=INK, pad=6)
