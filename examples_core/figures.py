@@ -351,6 +351,46 @@ def pattern(out: Path) -> None:
     plt.close(fig)
 
 
+def forecast_example(record: Path, out: Path, history_days: int = 56) -> None:
+    """One Walmart item: recent history, the held-out actuals, and both forecasts with their 80% intervals. The item is
+    chosen, not picked by eye: among the top quarter of items by sales, the one whose stock-Prophet MASE is closest to
+    the median over all items."""
+    import pandas as pd
+
+    from walmart_grocery_forecasting.pipeline import data as wdata
+
+    rec = json.loads(record.read_text(encoding='utf-8'))
+    z = np.load(record.with_suffix('.npz'))
+    ids = [str(i) for i in z['ids']]
+    test_ds = pd.DatetimeIndex(z['test_ds'])
+    wide = wdata.load_items()
+    mase = np.array(rec['per_series']['stock_pool_10']['mase'])
+    order = list(wide.index)  # per_series follows the items' (train) order
+    sales = wide.loc[order].mean(axis=1).to_numpy()
+    top = np.where(sales >= np.quantile(sales, 0.75))[0]
+    pick = order[top[np.argmin(np.abs(mase[top] - np.nanmedian(mase)))]]
+    i, y = ids.index(pick), wide.loc[pick]
+    hist = y[y.index < test_ds[0]].tail(history_days)
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    ax.plot(hist.index, hist.to_numpy(), color=MUTED, linewidth=1.3, label='history')
+    ax.plot(test_ds, y.loc[test_ds].to_numpy(), color=INK, linewidth=1.8, label='actual (held out)')
+    # prophet-batch first, stock dashed on top: the two lines coincide, so the dashes show where stock lies
+    for key, color, style, width, label in (('forecast_many_analytic_10', BLUE, '-', 3.0, 'prophet-batch'),
+                                            ('stock_pool_10', ORANGE, (0, (3, 3)), 1.6, 'stock Prophet')):
+        ax.fill_between(test_ds, z[f'{key}_lower'][i], z[f'{key}_upper'][i], color=color, alpha=0.10, linewidth=0)
+        ax.plot(test_ds, z[f'{key}_yhat'][i], color=color, linewidth=width, linestyle=style,
+                label=f'{label} (80% interval shaded)')
+    ax.axvline(test_ds[0], color=GRID, linewidth=1)
+    ax.set_ylabel('units sold per day')
+    ax.set_title(f'One item, 28 days ahead: the two forecasts nearly coincide ({pick})')
+    ax.set_ylim(0, None)
+    fig.autofmt_xdate()
+    fig.legend(*ax.get_legend_handles_labels(), loc='lower center', fontsize=8.5, ncol=4)
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.savefig(out / 'fig0-forecast-example.png')
+    plt.close(fig)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--out', type=Path, default=Path('figures'))
@@ -362,6 +402,7 @@ def main() -> int:
     p.add_argument('--spark', action='append', default=[], help='label=directory (a Spark benchmark directory)')
     p.add_argument('--stream', type=Path)
     p.add_argument('--pattern', action='store_true', help='the streaming-pattern diagram')
+    p.add_argument('--example', type=Path, help='a walmart run record (json) for the one-item forecast figure')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     datasets = a.public + a.small
@@ -380,6 +421,8 @@ def main() -> int:
         stream(a.stream, a.out)
     if a.pattern:
         pattern(a.out)
+    if a.example:
+        forecast_example(a.example, a.out)
     print(f'figures in {a.out}: {sorted(f.name for f in a.out.glob("*.png"))}')
     return 0
 

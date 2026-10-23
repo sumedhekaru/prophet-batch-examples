@@ -6,6 +6,7 @@ come from the runs on prophet-batch 0.1.2 from PyPI described in the results pag
 
 | file | shows | records |
 |---|---|---|
+| [fig0-forecast-example.png](fig0-forecast-example.png) | one Walmart item (a typical one, chosen by rule), history, held-out actuals and both forecasts (`--example`) | [walmart](../walmart_grocery_forecasting/results/local-macos-m4.md) |
 | [fig1-speedup.png](fig1-speedup.png) | speed-up vs a 10-process stock pool per dataset (Apple M4), analytic and default history intervals | [walmart](../walmart_grocery_forecasting/results/local-macos-m4.md), [public datasets](../public_datasets/results/macos-m4.md) |
 | [fig2-accuracy.png](fig2-accuracy.png) | per-series MASE, stock vs prophet-batch, six datasets | [public datasets](../public_datasets/results/macos-m4.md) |
 | [fig3-fit-quality.png](fig3-fit-quality.png) | log-posterior gain over Stan per series (38,905 series) | same |
@@ -23,7 +24,8 @@ uv run python -m examples_core.figures --out figures \
   --workers public_datasets/results/runs/scaling-workers-local-m5_item_store-<stamp>.json \
   --spark "Walmart, 1,437 items=walmart_grocery_forecasting/results/runs/dataproc-bench-<stamp>" \
   --spark "M5 item × store, 30,490 series=public_datasets/results/runs/dataproc-bench-<stamp>/m5_item_store" \
-  --stream streaming_csv/results/runs/m5_item-x328p-<stamp>.json --pattern
+  --stream streaming_csv/results/runs/m5_item-x328p-<stamp>.json --pattern \
+  --example walmart_grocery_forecasting/results/runs/local-bench-<stamp>/local-default-1437-<stamp>.json
 ```
 
 Colours: a categorical palette validated for colour-vision deficiency (blue: prophet-batch, orange: stock Prophet,

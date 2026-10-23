@@ -35,7 +35,9 @@ stock Prophet in a process pool on the same cores, `forecast_many` with `history
 | Cloud Run job, 8 vCPU ([page](results/cloudrun-us-east1.md)) | 13.8× | 27.7× | 13.5× |
 | Spark, Dataproc, 2 × 4 cores, end to end / execute ([page](results/dataproc-us-east1.md)) | 6.7× / 11.4× | 6.6× / 18.6× | 3.2× / 10.9× |
 
-With the default (history intervals sampled like stock), 3.6× / 9.5× / 3.8× on the Mac. The small datasets (359–414
+With the default (history intervals sampled like stock), 3.6× / 9.5× / 3.8× on the Mac. Against stock Prophet's
+fastest setup (future rows only, no history intervals; prophet-batch the same): 11.5× / 38.9× / 11.4×
+([page](results/future-only-macos-m4.md)). The small datasets (359–414
 series, seconds of work) gain 2.7–8.0×. **Accuracy:** as good as stock on all six datasets, better beyond noise on
 four; prophet-batch's fit (log posterior) is at least Stan's on 38,905 of 38,905 series. **Scaling:** the gain grows
 from 3.7× at 100 series to 13–15× from 3,000 series on, and it is 17× on a single core
