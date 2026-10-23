@@ -5,6 +5,8 @@ forecasting many [Prophet](https://github.com/facebook/prophet) models at once. 
 speed** against stock Prophet on the same data, in the environments people actually run: a laptop, Docker, Cloud Run
 jobs, Dataproc and Spark.
 
+The story behind these results: [Up to 37× faster Prophet: fitting thousands of series in one call](https://medium.com/@sumedhekaru/up-to-37-faster-prophet-fitting-thousands-of-series-in-one-call-f532fae5c9e7) (Medium).
+
 Running these is also how prophet-batch gets tested in practice. Bugs found here are reported to the repository they
 belong to (prophet-batch, or Prophet itself) and fixed there.
 
