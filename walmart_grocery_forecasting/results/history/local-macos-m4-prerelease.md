@@ -9,7 +9,7 @@ Reproduce: `sh walmart_grocery_forecasting/envs/local/run.sh`.
 Every method fits the model and forecasts the history plus the 28 days, as `model.predict(model.make_future_dataframe(28))`
 does. prophet-batch: `fit_many` + `predict_many`, with history intervals sampled like stock (`history_uncertainty=True`)
 or in exact closed form (`'analytic'`), keeping only the interval columns (`predict_many(columns=...)`), as the stock
-workers return only those. Linux container: [docker-linux-arm64.md](docker-linux-arm64.md).
+workers return only those. Linux container: [docker-linux-arm64.md](docker-linux-arm64-prerelease.md).
 
 ## Speed: seconds for all 1,437 items (fit + forecast)
 

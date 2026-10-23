@@ -8,15 +8,16 @@ jobs, Dataproc and Spark.
 Running these is also how prophet-batch gets tested in practice. Bugs found here are reported to the repository they
 belong to (prophet-batch, or Prophet itself) and fixed there.
 
-Status: in development. The first use case runs locally, in a local Linux container, as a Cloud Run job and on Spark (Dataproc Serverless).
+Status: in development. The use cases run locally, in a local Linux container, as Cloud Run jobs and on Spark (Dataproc
+Serverless); results on prophet-batch 0.1.2 from PyPI. Figures: [figures/](figures/).
 
 ## Use cases
 
 | Folder | Data | Question |
 |---|---|---|
-| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 7.4–11× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run, Spark, Windows) |
-| [public_datasets](public_datasets/) | M5 item and item × store, M4 Daily / Weekly / Hourly, Tourism Monthly: 38,905 series | Same accuracy and a better fit than Stan across six datasets and four frequencies; speed at scale (30,490 series) |
-| [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB) | A file of any size forecast in batches, read / forecast / write at the same time, with flat memory and restartable output |
+| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 10–14× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run); on Spark 9.8× in execution |
+| [public_datasets](public_datasets/) | M5 item and item × store, M4 Daily / Weekly / Hourly, Tourism Monthly: 38,905 series | Same accuracy (better beyond noise on four datasets) and a fit at least as good as Stan's on every series; 14.5× on 30,490 series and 37× on M4 Daily's long series (Apple M4); on Spark the end-to-end gain grows to 6.7× with the job |
+| [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB; and 1,000,072 resampled series, 7.4 GB gzip) | A file of any size forecast in batches, read / forecast / write at the same time, with bounded memory and restartable output: a million series in 33 minutes on a laptop |
 
 ## Layout
 
@@ -55,6 +56,6 @@ Each run record says which was used: `prophet-batch 0.1.2 (PyPI)` or `prophet-ba
 
 - Data is downloaded by a script and verified by checksum; it is never committed.
 - Every result records the machine, environment and package versions, and can be rerun with one command.
-- Published results use released prophet-batch from PyPI (the run records say "prophet-batch 0.1.1 (PyPI)");
+- Published results use released prophet-batch from PyPI (the run records say "prophet-batch 0.1.2 (PyPI)");
   results from unreleased code are not published here.
 - Stock Prophet and prophet-batch get identical inputs and model settings.

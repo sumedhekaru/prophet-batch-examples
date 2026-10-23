@@ -74,8 +74,8 @@ for dataset in $DATASETS; do
     rep=$((rep + 1))
   done
   copied=0
-  for try in 1 2 3; do  # one large download failed once without retry (K4); errors go to copy.log
-    gcloud storage cp "gs://$BUCKET/bench/$STAMP/$dataset/*" "$OUT/$dataset/" >> "$OUT/copy.log" 2>&1 && { copied=1; break; }
+  for try in 1 2 3; do  # one large download failed once without retry (K4: sliced downloads hung; off here); errors go to copy.log
+    CLOUDSDK_STORAGE_SLICED_OBJECT_DOWNLOAD_THRESHOLD=0 gcloud storage cp "gs://$BUCKET/bench/$STAMP/$dataset/*" "$OUT/$dataset/" >> "$OUT/copy.log" 2>&1 && { copied=1; break; }
     sleep 10
   done
   [ "$copied" = 1 ] || log "copying $dataset results FAILED (see copy.log)"

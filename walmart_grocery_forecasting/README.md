@@ -17,27 +17,28 @@ time), per environment.
 
 ## Results
 
-All results on **prophet-batch 0.1.1 from PyPI**, 3 repetitions each, median. Local, Apple M4 (10 cores), 1,437 items,
+All results on **prophet-batch 0.1.2 from PyPI**, 3 repetitions each, median. Local, Apple M4 (10 cores), 1,437 items,
 fit + forecast ([full tables](results/local-macos-m4.md)):
 
-| model | stock, 10-process pool | prophet-batch | accuracy (Δ MASE, ± 2 SE) |
+| model | stock, 10-process pool | prophet-batch `forecast_many` | accuracy (Δ MASE, ± 2 SE) |
 |---|---:|---:|---:|
-| default | 53.1 s | 5.2 s (10.2×) | −0.0018 ± 0.0023 |
-| + events | 69.4 s | 6.7 s (10.4×) | −0.0011 ± 0.0021 |
-| + events + SNAP | 75.5 s | 8.5 s (8.9×) | −0.0010 ± 0.0022 |
+| default | 55.5 s | 4.1 s (13.6×) | −0.0018 ± 0.0023 |
+| + events | 74.1 s | 5.7 s (13.1×) | −0.0011 ± 0.0021 |
+| + events + SNAP | 79.5 s | 6.9 s (11.6×) | −0.0010 ± 0.0022 |
 
-prophet-batch with `history_uncertainty='analytic'`; with history intervals sampled like stock it is 3.4–4.2× faster.
+prophet-batch with `history_uncertainty='analytic'` (one argument); with the default (history intervals sampled like
+stock) it is 3.9–4.6× faster. `fit_many` + `predict_many` (when you want the fitted models): 9.9× / 10.5× / 8.6×.
 
-| environment | speed-up vs a stock pool on the same cores (default / events / events + SNAP) |
+| environment | `forecast_many` vs a stock pool on the same cores (default / events / events + SNAP) |
 |---|---|
-| macOS, Apple M4, 10 processes | 10.2× / 10.4× / 8.9× ([page](results/local-macos-m4.md)) |
-| Linux container (Docker, same Mac) | 8.6× / 8.3× / 7.4× ([page](results/docker-linux-arm64.md)) |
-| Cloud Run job, 4 vCPU | 10.9× / 11.1× / 8.9× ([page](results/cloudrun-us-east1.md)) |
-| Spark, Dataproc Serverless, 2 executors × 4 cores (default model) | 9.7× in execution, 1.9× end to end incl. ≈ 185 s of platform setup, load and warm-up ([page](results/dataproc-us-east1.md)) |
-| Windows laptop, i7-1260P, 16 processes | 11.6× / 11.2× / 9.1× ([page](results/windows-i7-1260p.md)) |
+| macOS, Apple M4, 10 processes | 13.6× / 13.1× / 11.6× ([page](results/local-macos-m4.md)) |
+| Linux container (Docker, same Mac) | 11.5× / 11.4× / 10.2× ([page](results/docker-linux-arm64.md)) |
+| Cloud Run job, 4 vCPU | 13.0× / 12.0× / 10.7× ([page](results/cloudrun-us-east1.md)) |
+| Spark, Dataproc Serverless, 2 executors × 4 cores (default model, `fit_many` + `predict_many` per group) | 9.8× in execution, 2.2× end to end incl. ≈ 130 s of platform setup, load and warm-up ([page](results/dataproc-us-east1.md)) |
+| Windows laptop, i7-1260P, 16 processes (0.1.1, two-step) | 11.6× / 11.2× / 9.1× ([page](results/windows-i7-1260p.md)); 0.1.2 run pending |
 
-Same accuracy everywhere; prophet-batch's forecasts agree across macOS and Linux to 3.5·10⁻⁹, stock Prophet's differ by
-up to 11 units/day. Pre-release results (prophet-batch from a local checkout, before PyPI): [results/history/](results/history/).
+Same accuracy everywhere; prophet-batch's forecasts agree across platforms to floating-point rounding (≈ 10⁻⁹).
+Earlier results: [results/history/](results/history/) (0.1.1 and pre-release).
 
 ## Run it
 

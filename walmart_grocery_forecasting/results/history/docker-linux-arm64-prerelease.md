@@ -7,7 +7,7 @@
 10 CPUs, 8 GB · 1,437 M5 FOODS items, 28 days held out · 10 worker processes. Reproduce:
 `sh walmart_grocery_forecasting/envs/docker/build.sh && sh walmart_grocery_forecasting/envs/docker/run.sh`.
 
-Same pipeline and settings as the [macOS run](local-macos-m4.md); prophet-batch keeps only the interval columns of each
+Same pipeline and settings as the [macOS run](local-macos-m4-prerelease.md); prophet-batch keeps only the interval columns of each
 forecast (`predict_many(columns=...)`), as the stock workers return only those.
 
 ## Speed: seconds for all 1,437 items (fit + forecast)

@@ -63,7 +63,11 @@ mkdir -p public_datasets/results/runs
 if [ -n "$REPS" ]; then
   OUT=public_datasets/results/runs/$SUB
   mkdir -p "$OUT"
-  gcloud storage cp "gs://$BUCKET/results/$SUB/*" "$OUT/"
+  # sliced (parallel) downloads hung for 30 min in K4: one stream per file, and retry
+  for try in 1 2 3; do
+    CLOUDSDK_STORAGE_SLICED_OBJECT_DOWNLOAD_THRESHOLD=0 gcloud storage rsync "gs://$BUCKET/results/$SUB" "$OUT" && break
+    sleep 10
+  done
   uv run python -m examples_core.bench_summary "$OUT" > "$OUT/summary.md"
   echo "summary: $OUT/summary.md"
 else

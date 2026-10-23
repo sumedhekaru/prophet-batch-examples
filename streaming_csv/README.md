@@ -34,4 +34,10 @@ full frame (history rows and every component) is the default of `forecast_many`;
 a database (`SELECT ... ORDER BY series_id` through a server-side cursor, `fetchmany`; write with a bulk insert or
 `COPY`), or Spark (`mapInPandas` per partition, as in the Dataproc example).
 
+**Results** ([results/macos-m4.md](results/macos-m4.md), prophet-batch 0.1.2 from PyPI, Apple M4): 3,049 → 24,392
+series (169 MB → 1.5 GB) with the main process at 0.42 → 0.56 GB; and **1,000,072 series from a 7.4 GB compressed CSV
+in 33.4 minutes**, memory bounded at ≈ 1 GB in the main process and 0.14 GB per worker throughout. `prepare.py
+--copies N --perturb --gzip` makes such a file (copies after the first resampled into different series); `run.py` and
+`check.py` read `.csv.gz` as well, and `check.py --first-series N` checks a file too large to forecast in memory.
+
 Uses `forecast_many` and `Pool` (prophet-batch ≥ 0.1.2, installed from PyPI by `uv sync`).

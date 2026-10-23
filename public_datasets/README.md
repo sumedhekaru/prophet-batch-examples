@@ -2,7 +2,8 @@
 
 Default `Prophet()` on six public datasets (38,905 series in all), each split by its own convention, forecasting the
 history plus the held-out steps (typical usage, so history intervals are included). Stock Prophet runs per series,
-serially (a sample, extrapolated) and in a process pool on every core; prophet-batch runs `fit_many` + `predict_many`.
+serially (a sample, extrapolated) and in a process pool on every core; prophet-batch runs `forecast_many` (one call)
+and `fit_many` + `predict_many` (when you want the fitted models).
 
 | dataset | series | rows per series | frequency | held out | source |
 |---|---:|---:|---|---:|---|
@@ -22,6 +23,24 @@ fit quality (each series' log posterior vs Stan's), speed (fit + forecast), and 
 bit-identical to `n_jobs=many`; on more than 5,000 series on a 2,000-series sample, valid because a series' fit
 does not depend on its batch mates; fallbacks to Stan).
 
+## Results
+
+All on **prophet-batch 0.1.2 from PyPI**; the large datasets 3 times, median. Fit + forecast of every series, against
+stock Prophet in a process pool on the same cores, `forecast_many` with `history_uncertainty='analytic'`:
+
+| environment | M5 item × store (30,490) | M4 Daily (4,227) | M5 item (3,049) |
+|---|---:|---:|---:|
+| macOS, Apple M4, 10 processes ([page](results/macos-m4.md)) | 14.5× (993 s → 68 s) | 37.1× (489 s → 13 s) | 14.8× |
+| Linux container, same Mac ([page](results/docker-linux-arm64.md)) | 12.3× | 28.6× | 13.0× |
+| Cloud Run job, 8 vCPU ([page](results/cloudrun-us-east1.md)) | 13.8× | 27.7× | 13.5× |
+| Spark, Dataproc, 2 × 4 cores, end to end / execute ([page](results/dataproc-us-east1.md)) | 6.7× / 11.4× | 6.6× / 18.6× | 3.2× / 10.9× |
+
+With the default (history intervals sampled like stock), 3.6× / 9.5× / 3.8× on the Mac. The small datasets (359–414
+series, seconds of work) gain 2.7–8.0×. **Accuracy:** as good as stock on all six datasets, better beyond noise on
+four; prophet-batch's fit (log posterior) is at least Stan's on 38,905 of 38,905 series. **Scaling:** the gain grows
+from 3.7× at 100 series to 13–15× from 3,000 series on, and it is 17× on a single core
+([scaling](results/scaling-macos-m4.md)).
+
 ## Run it
 
 ```sh
@@ -30,11 +49,10 @@ sh public_datasets/envs/local/run.sh                                            
 DATASETS="m4_weekly m4_hourly tourism_monthly" sh public_datasets/envs/local/run.sh
 REPS=3 sh public_datasets/envs/local/run.sh                                      # benchmark: 3 repetitions + summary.md
 sh public_datasets/envs/docker/build.sh && REPS=3 sh public_datasets/envs/docker/run.sh   # the same in Linux
+uv run python -m public_datasets.pipeline.scaling                                # time vs number of series
 ```
 
-`m5_item_store` needs ≈ 10 GB of memory with 10 workers. Code: [pipeline/](pipeline/) (data, run); the runners,
-metrics and run records are shared with the other use case ([examples_core/](../examples_core/)).
-
-## Results
-
-To come (prophet-batch 0.1.1 from PyPI, 3 repetitions): [results/](results/).
+In the cloud: [Cloud Run job](envs/cloudrun_job/README.md) and [Spark on Dataproc](envs/dataproc/README.md).
+`m5_item_store` needs ≈ 11–14 GB of memory for the full comparison (the run keeps every method's results). Code:
+[pipeline/](pipeline/) (data, run, scaling, spark_job); the runners, metrics and run records are shared with the
+other use cases ([examples_core/](../examples_core/)).
