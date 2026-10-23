@@ -99,7 +99,6 @@ def hero(dirs: list[Path], out: Path) -> None:
     ax.set_yticks(y, [NAMES[g] for g in order])
     ax.tick_params(axis='y', length=0)
     ax.grid(axis='y', visible=False)
-    ax.axvline(1, color=INK_2, linewidth=1)
     ax.set_xlabel('times faster than a 10-process stock Prophet pool (fit + forecast, median)')
     ax.set_xlim(0, max(v[0] for v in sp.values()) * 1.15)
     ax.set_title('prophet-batch vs stock Prophet on the same 10 cores (Apple M4)')
