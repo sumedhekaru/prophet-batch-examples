@@ -306,6 +306,52 @@ def stream(path: Path, out: Path) -> None:
     plt.close(fig)
 
 
+def pattern(out: Path) -> None:
+    """The streaming pattern (streaming_csv): reader → bounded queue → Pool.forecast_many → bounded queue → writer."""
+    from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+
+    fig, ax = plt.subplots(figsize=(10, 4.6))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 46)
+    ax.axis('off')
+    IO, Q = '#f1f0ec', '#ffffff'
+
+    def box(x, y, w, h, title, body, face, edge=GRID, title_color=INK, lw=1.2):
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle='round,pad=0.4,rounding_size=1.2', facecolor=face,
+                                    edgecolor=edge, linewidth=lw))
+        ax.text(x + w / 2, y + h - 2.2, title, ha='center', va='top', fontsize=10, fontweight='bold', color=title_color)
+        ax.text(x + w / 2, y + h - 6.2, body, ha='center', va='top', fontsize=8.3, color=INK_2, linespacing=1.35)
+
+    def arrow(x0, x1, y=27):
+        ax.add_patch(FancyArrowPatch((x0, y), (x1, y), arrowstyle='-|>', mutation_scale=14, color=INK_2,
+                                     linewidth=1.4))
+
+    box(0.5, 16, 11.5, 22, 'Your data', 'any size:\nCSV, Parquet,\na database,\nSpark\npartitions', IO)
+    box(15, 16, 11.5, 22, 'Reader', 'thread:\nwhole series\nper batch\n(e.g. 1,000)', IO)
+    box(29.5, 21, 6, 12, 'queue', '≤ 2\nbatches', Q, edge=MUTED)
+    box(38.5, 12, 23, 30, 'Pool.forecast_many', 'prophet-batch fits and\nforecasts each batch', '#eaf2fc', edge=BLUE,
+        lw=1.6)
+    for i in range(5):
+        ax.add_patch(FancyBboxPatch((40.6 + i * 4.2, 18.5), 2.9, 5.0, boxstyle='round,pad=0.2,rounding_size=0.6',
+                                    facecolor=BLUE, edgecolor=SURFACE, linewidth=1))
+    ax.text(50, 16.0, 'worker processes, kept for the\nwhole run: ≈ 0.14 GB each', ha='center', va='top', fontsize=7.8,
+            color=INK_2, linespacing=1.3)
+    box(64.5, 21, 6, 12, 'queue', '≤ 2\nbatches', Q, edge=MUTED)
+    box(73.5, 16, 11.5, 22, 'Writer', 'thread:\none file per\nbatch, written\nthen renamed', IO)
+    box(88, 16, 11.5, 22, 'Your output', 'forecasts,\nin the same\nstore or\nanother', IO)
+    for x0, x1 in ((12.6, 14.6), (27.1, 29.1), (36.1, 38.1), (62.1, 64.1), (71.1, 73.1), (85.6, 87.6)):
+        arrow(x0, x1)
+    ax.text(50, 7.5, 'Read, forecast and write overlap. At most ≈ 5 batches exist at once, so memory is set by the batch '
+            'size, not the file:', ha='center', fontsize=9, color=INK)
+    ax.text(50, 3.6, '1,000,072 series (7.4 GB gzip) in 33 minutes on a laptop, main process ≤ 1.04 GB. '
+            'A part that exists is skipped, so a stopped run resumes.', ha='center', fontsize=9, color=INK_2)
+    ax.set_title('Forecasting a catalogue of any size with bounded memory', loc='left', fontsize=12, fontweight='bold',
+                 color=INK, pad=6)
+    fig.tight_layout()
+    fig.savefig(out / 'fig7-streaming-pattern.png')
+    plt.close(fig)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--out', type=Path, default=Path('figures'))
@@ -316,6 +362,7 @@ def main() -> int:
     p.add_argument('--workers', type=Path)
     p.add_argument('--spark', action='append', default=[], help='label=directory (a Spark benchmark directory)')
     p.add_argument('--stream', type=Path)
+    p.add_argument('--pattern', action='store_true', help='the streaming-pattern diagram')
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     datasets = a.public + a.small
@@ -332,6 +379,8 @@ def main() -> int:
         spark({label: Path(d) for label, d in (x.split('=', 1) for x in a.spark)}, a.out)
     if a.stream:
         stream(a.stream, a.out)
+    if a.pattern:
+        pattern(a.out)
     print(f'figures in {a.out}: {sorted(f.name for f in a.out.glob("*.png"))}')
     return 0
 

@@ -11,6 +11,8 @@ pd.read_csv(chunksize=...)                fit + forecast each batch on          
 whole series per chunk                    workers kept for the whole run                    batch (part-00007.csv)
 ```
 
+![The streaming pattern](results/figures/streaming-pattern.png)
+
 ```sh
 uv run python -m streaming_csv.prepare --copies 4            # the processed input: M5 items, 4 copies (≈ 600 MB)
 uv run python -m streaming_csv.run data/streaming/m5_item-x4.csv --series-per-batch 1000

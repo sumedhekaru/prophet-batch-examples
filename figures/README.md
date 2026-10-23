@@ -12,6 +12,7 @@ come from the runs on prophet-batch 0.1.2 from PyPI described in the results pag
 | [fig4-spark-phases.png](fig4-spark-phases.png) | Spark batch phases, walmart and M5 item × store | [walmart](../walmart_grocery_forecasting/results/dataproc-us-east1.md), [public](../public_datasets/results/dataproc-us-east1.md) |
 | [fig5-scaling.png](fig5-scaling.png) | time vs number of series (100 → 30,490) | [scaling](../public_datasets/results/scaling-macos-m4.md) |
 | [fig5b-workers.png](fig5b-workers.png) | time vs workers (1 → 10) at 1,000 series | same |
+| [fig7-streaming-pattern.png](fig7-streaming-pattern.png) | the suggested pattern for a catalogue of any size: reader → bounded queue → `Pool.forecast_many` → bounded queue → writer (diagram; `--pattern`) | [streaming](../streaming_csv/README.md) |
 | [fig6-stream-memory.png](fig6-stream-memory.png) | memory over time while 1,000,072 series stream through | [streaming](../streaming_csv/results/macos-m4.md) |
 
 ```sh
@@ -22,7 +23,7 @@ uv run python -m examples_core.figures --out figures \
   --workers public_datasets/results/runs/scaling-workers-local-m5_item_store-<stamp>.json \
   --spark "Walmart, 1,437 items=walmart_grocery_forecasting/results/runs/dataproc-bench-<stamp>" \
   --spark "M5 item × store, 30,490 series=public_datasets/results/runs/dataproc-bench-<stamp>/m5_item_store" \
-  --stream streaming_csv/results/runs/m5_item-x328p-<stamp>.json
+  --stream streaming_csv/results/runs/m5_item-x328p-<stamp>.json --pattern
 ```
 
 Colours: a categorical palette validated for colour-vision deficiency (blue: prophet-batch, orange: stock Prophet,
