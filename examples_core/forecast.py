@@ -77,14 +77,16 @@ def _quiet() -> None:
     logging.getLogger('cmdstanpy').disabled = True
 
 
-def _stock_one(args: tuple[str, pd.DataFrame, int, ModelSpec]) -> tuple[str, np.ndarray, float, float, float]:
-    sid, train, horizon, spec = args
+def _stock_one(args: tuple) -> tuple[str, np.ndarray, float, float, float]:
+    sid, train, horizon, spec, *rest = args
+    include_history = rest[0] if rest else True
     _quiet()
     t0 = time.perf_counter()
     m = spec(sid).fit(train)
     t1 = time.perf_counter()
     np.random.seed(zlib.crc32(sid.encode()))
-    fc = m.predict(spec.with_regressors(m.make_future_dataframe(horizon, freq=spec.freq))).tail(horizon)
+    future = m.make_future_dataframe(horizon, freq=spec.freq, include_history=include_history)
+    fc = m.predict(spec.with_regressors(future)).tail(horizon)
     t2 = time.perf_counter()
     bands = fc[['yhat', 'yhat_lower', 'yhat_upper']].to_numpy().T
     return sid, bands, float(m.params['lp__'][0, 0]), t1 - t0, t2 - t1
@@ -102,12 +104,15 @@ def run_stock_serial(series: dict[str, pd.DataFrame], horizon: int, spec: ModelS
     return _stock_result('stock_serial', 1, out, sum(o[3] for o in out), sum(o[4] for o in out))
 
 
-def run_stock_pool(series: dict[str, pd.DataFrame], horizon: int, spec: ModelSpec, workers: int) -> Result:
-    """Wall time of the whole pool; split into fit / predict by the workers' summed shares."""
+def run_stock_pool(series: dict[str, pd.DataFrame], horizon: int, spec: ModelSpec, workers: int,
+                   include_history: bool = True) -> Result:
+    """Wall time of the whole pool; split into fit / predict by the workers' summed shares. include_history=False:
+    forecast the future rows only (stock's fastest setup when history forecasts are not needed)."""
     t0 = time.perf_counter()
     ctx = multiprocessing.get_context('spawn')
     with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
-        out = list(pool.map(_stock_one, [(sid, df, horizon, spec) for sid, df in series.items()], chunksize=4))
+        out = list(pool.map(_stock_one, [(sid, df, horizon, spec, include_history) for sid, df in series.items()],
+                            chunksize=4))
     wall = time.perf_counter() - t0
     fit_share = sum(o[3] for o in out) / sum(o[3] + o[4] for o in out)
     return _stock_result('stock_pool', workers, out, wall * fit_share, wall * (1 - fit_share))
@@ -187,7 +192,7 @@ def _futures(long_df: pd.DataFrame, horizon: int, spec: ModelSpec) -> pd.DataFra
 
 
 def run_forecast_many(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, workers: int,
-                      seed: int = 0) -> list[Result]:
+                      seed: int = 0, include_history: bool = True) -> list[Result]:
     """prophet-batch 0.1.2's one-step path: forecast_many (fit + forecast in each worker, no models sent between
     processes), once per history-interval mode, each a full call. Same output columns as run_batch keeps, so its
     forecasts must equal run_batch's bit for bit. Timed as one step: fit_s holds the whole call, predict_s is 0.
@@ -197,10 +202,12 @@ def run_forecast_many(long_df: pd.DataFrame, horizon: int, spec: ModelSpec, work
     kwargs: dict[str, Any] = {'make_model': spec} if spec.regressors else spec.kwargs()
     where = ({'futures': _futures(long_df, horizon, spec)} if spec.regressors else {'periods': horizon})
     results = []
-    for mode in (True, 'analytic'):
+    # without history rows there are no history intervals: one call (the two modes would be the same)
+    for mode in ((True, 'analytic') if include_history else (True,)):
         t0 = time.perf_counter()
         fc, params = forecast_many(long_df, freq=spec.freq, seed=seed, n_jobs=workers, history_uncertainty=mode,
-                                   columns=BANDS, return_params=True, **where, **kwargs)
+                                   columns=BANDS, return_params=True, include_history=include_history, **where,
+                                   **kwargs)
         seconds = time.perf_counter() - t0
         ids = list(params)
         tail = fc.groupby('unique_id', sort=False).tail(horizon)
