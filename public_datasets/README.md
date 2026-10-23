@@ -38,7 +38,8 @@ stock Prophet in a process pool on the same cores, `forecast_many` with `history
 With the default (history intervals sampled like stock), 3.6× / 9.5× / 3.8× on the Mac. Against stock Prophet's
 fastest setup (future rows only, no history intervals; prophet-batch the same): 11.5× / 38.9× / 11.4×
 ([page](results/future-only-macos-m4.md)). The small datasets (359–414
-series, seconds of work) gain 2.7–8.0×. **Accuracy:** as good as stock on all six datasets, better beyond noise on
+series, seconds of work) gain 2.7–8.0× (Windows laptop: 3.8–6.6×, [page](results/windows-i7-1260p.md); its run of the
+large datasets was stopped and will be repeated). **Accuracy:** as good as stock on all six datasets, better beyond noise on
 four; prophet-batch's fit (log posterior) is at least Stan's on 38,905 of 38,905 series. **Scaling:** the gain grows
 from 3.7× at 100 series to 13–15× from 3,000 series on, and it is 17× on a single core
 ([scaling](results/scaling-macos-m4.md)).

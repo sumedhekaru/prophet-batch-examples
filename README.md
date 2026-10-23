@@ -15,7 +15,7 @@ Serverless); results on prophet-batch 0.1.2 from PyPI. Figures: [figures/](figur
 
 | Folder | Data | Question |
 |---|---|---|
-| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 10–14× faster than a stock process pool on the same cores (macOS, Linux, Cloud Run); on Spark 9.8× in execution |
+| [walmart_grocery_forecasting](walmart_grocery_forecasting/) | M5 (Walmart), FOODS category, item level: 1,437 daily series | 28-day forecasts: same accuracy as stock Prophet, 10–16× faster than a stock process pool on the same cores (macOS, Linux, Windows, Cloud Run); on Spark 9.8× in execution |
 | [public_datasets](public_datasets/) | M5 item and item × store, M4 Daily / Weekly / Hourly, Tourism Monthly: 38,905 series | Same accuracy (better beyond noise on four datasets) and a fit at least as good as Stan's on every series; 14.5× on 30,490 series and 37× on M4 Daily's long series (Apple M4); on Spark the end-to-end gain grows to 6.7× with the job |
 | [streaming_csv](streaming_csv/) | M5 items written as one CSV (1–8 copies, up to 1.5 GB; and 1,000,072 resampled series, 7.4 GB gzip) | A file of any size forecast in batches, read / forecast / write at the same time, with bounded memory and restartable output: a million series in 33 minutes on a laptop |
 

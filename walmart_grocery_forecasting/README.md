@@ -35,7 +35,7 @@ stock) it is 3.9–4.6× faster. `fit_many` + `predict_many` (when you want the 
 | Linux container (Docker, same Mac) | 11.5× / 11.4× / 10.2× ([page](results/docker-linux-arm64.md)) |
 | Cloud Run job, 4 vCPU | 13.0× / 12.0× / 10.7× ([page](results/cloudrun-us-east1.md)) |
 | Spark, Dataproc Serverless, 2 executors × 4 cores (default model, `fit_many` + `predict_many` per group) | 9.8× in execution, 2.2× end to end incl. ≈ 130 s of platform setup, load and warm-up ([page](results/dataproc-us-east1.md)) |
-| Windows laptop, i7-1260P, 16 processes (0.1.1, two-step) | 11.6× / 11.2× / 9.1× ([page](results/windows-i7-1260p.md)); 0.1.2 run pending |
+| Windows laptop, i7-1260P, 16 processes | 15.8× / 13.2× / 12.6× ([page](results/windows-i7-1260p.md)) |
 
 Same accuracy everywhere; prophet-batch's forecasts agree across platforms to floating-point rounding (≈ 10⁻⁹).
 Earlier results: [results/history/](results/history/) (0.1.1 and pre-release).
