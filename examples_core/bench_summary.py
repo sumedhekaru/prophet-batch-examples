@@ -24,9 +24,9 @@ ORDER = ['default', 'events', 'events_snap', 'm5_item_store', 'm4_daily', 'm5_it
 MODEL_LABEL = {'default': 'default `Prophet()`', 'events': '+ M5 events as holidays',
                'events_snap': '+ events + SNAP regressors'}
 METHOD_LABEL = {'stock_serial': 'stock, serial¹', 'stock_pool': 'stock, process pool',
-                'batch_sampled': 'prophet-batch, sampled history intervals',
+                'batch_sampled': 'prophet-batch, default history intervals',
                 'batch_analytic': 'prophet-batch, analytic history intervals',
-                'forecast_many_sampled': 'forecast_many (one step), sampled history intervals²',
+                'forecast_many_sampled': 'forecast_many (one step), default history intervals²',
                 'forecast_many_analytic': 'forecast_many (one step), analytic history intervals²'}
 
 

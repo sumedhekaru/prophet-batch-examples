@@ -92,7 +92,7 @@ def hero(dirs: list[Path], out: Path) -> None:
     h = 0.36
     fig, ax = plt.subplots(figsize=(7.5, 0.55 * len(order) + 1.6))
     ax.barh(y + h / 2, [sp[g][0] for g in order], height=h, color=BLUE, label="history_uncertainty='analytic'")
-    ax.barh(y - h / 2, [sp[g][1] for g in order], height=h, color=AQUA, label='default (history intervals sampled)')
+    ax.barh(y - h / 2, [sp[g][1] for g in order], height=h, color=AQUA, label='default history intervals')
     for i, g in enumerate(order):
         _label_bar(ax, y[i] + h / 2, sp[g][0], f'{sp[g][0]:.1f}×')
         _label_bar(ax, y[i] - h / 2, sp[g][1], f'{sp[g][1]:.1f}×')

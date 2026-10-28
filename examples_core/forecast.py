@@ -6,8 +6,8 @@ joined), so the timings include history intervals. Accuracy uses the last `horiz
 
   stock_serial  Prophet().fit + predict per series in one process (on a sample: it is slow; extrapolated)
   stock_pool    the same per series in a process pool (spawn, `workers` processes)
-  batch         prophet_batch.fit_many + predict_many with n_jobs=`workers`; history intervals sampled like stock
-                (history_uncertainty=True) and exact closed form ('analytic'), both from the same fit
+  batch         prophet_batch.fit_many + predict_many with n_jobs=`workers`; history intervals by default
+                (history_uncertainty=True: stock's distribution; order statistics from prophet-batch 0.1.3) and exact closed form ('analytic'), both from the same fit
 Stock forecasts seed numpy with crc32(item id) before each predict; prophet-batch uses seed=0 (per-series streams).
 """
 

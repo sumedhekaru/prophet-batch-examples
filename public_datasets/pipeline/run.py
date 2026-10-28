@@ -4,7 +4,7 @@
     uv run python -m public_datasets.pipeline.run --dataset m4_daily --n 50     # smoke run on a random sample
 
 Methods (examples_core/forecast.py): stock serial (timed on --serial-n series, extrapolated), stock pool (all series,
---workers processes), prophet-batch with n_jobs=--workers (all series; history intervals sampled like stock, and
+--workers processes), prophet-batch with n_jobs=--workers (all series; default history intervals, and
 analytic), and prophet-batch with n_jobs=1 on --check-n series (timed and extrapolated; its forecasts must equal the
 n_jobs=--workers ones bit for bit: a series' fit and forecast do not depend on its batch mates).
 Writes results/runs/<env>-<dataset>-<n>-<timestamp>.{json,npz,md}; needs the data: python -m public_datasets.pipeline.data

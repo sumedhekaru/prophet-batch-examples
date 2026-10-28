@@ -11,7 +11,9 @@ Running these is also how prophet-batch gets tested in practice. Bugs found here
 belong to (prophet-batch, or Prophet itself) and fixed there.
 
 Status: in development. The use cases run locally, in a local Linux container, as Cloud Run jobs and on Spark (Dataproc
-Serverless); results on prophet-batch 0.1.2 from PyPI. Figures: [figures/](figures/).
+Serverless); results on prophet-batch 0.1.2 from PyPI. Figures: [figures/](figures/). The examples now install
+0.1.3, whose default history intervals (same distribution, drawn from order statistics) make the default-settings
+rows as fast as the analytic ones; the analytic rows are unchanged.
 
 ## Use cases
 
@@ -47,17 +49,17 @@ and `uv.lock` (what `pip install prophet-batch` gives you), so the results here 
 ```
 git clone https://github.com/sumedhekaru/prophet-batch-examples.git
 cd prophet-batch-examples
-uv sync          # Python 3.12, prophet==1.5.0 and prophet-batch==0.1.2 from PyPI, jupyter
+uv sync          # Python 3.12, prophet==1.5.0 and prophet-batch==0.1.3 from PyPI, jupyter
 ```
 
 Developing prophet-batch itself: with a checkout of it next to this repo, `PROPHET_BATCH_LOCAL=../prophet-batch` runs
 the scripts against that checkout instead (`uv run --with-editable` locally, a wheel built from it in the images).
-Each run record says which was used: `prophet-batch 0.1.2 (PyPI)` or `prophet-batch 0.1.2 (local <commit>)`.
+Each run record says which was used: `prophet-batch 0.1.3 (PyPI)` or `prophet-batch 0.1.3 (local <commit>)`.
 
 ## Principles
 
 - Data is downloaded by a script and verified by checksum; it is never committed.
 - Every result records the machine, environment and package versions, and can be rerun with one command.
-- Published results use released prophet-batch from PyPI (the run records say "prophet-batch 0.1.2 (PyPI)");
+- Published results use released prophet-batch from PyPI (the run records say e.g. "prophet-batch 0.1.2 (PyPI)");
   results from unreleased code are not published here.
 - Stock Prophet and prophet-batch get identical inputs and model settings.
